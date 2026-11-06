@@ -113,6 +113,10 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
       }}));
     };
     source.connect(processor);
+    const silentGain = context.createGain();
+    silentGain.gain.value = 0;
+    processor.connect(silentGain);
+    silentGain.connect(context.destination);
   }
 
   function analyseSample() {
