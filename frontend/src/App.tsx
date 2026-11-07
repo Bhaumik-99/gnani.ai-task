@@ -162,7 +162,7 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
             await context.resume();
             playerRef.current = new PcmStreamPlayer(context);
           }
-          ws.send(JSON.stringify({ event: "session.start", payload: { language_code: "indic-auto", sample_rate: inputRateRef.current } }));
+          ws.send(JSON.stringify({ event: "session.start", payload: { language_code: language, sample_rate: inputRateRef.current } }));
           setPhase("active");
           setStatus(prismaReady ? "Session connected · starting Prisma" : "Prisma not configured · use the fictional demo phrase");
           setBusy(false);
