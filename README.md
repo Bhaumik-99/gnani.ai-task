@@ -99,13 +99,15 @@ cd backend
 pytest -q
 ruff check app tests evaluation
 python -m evaluation.evaluate_rules --dataset evaluation/datasets/rules_smoke.jsonl
+python -m evaluation.evaluate_transcripts --dataset evaluation/datasets/transcripts_smoke.jsonl
+python -m evaluation.evaluate_latency --dataset evaluation/datasets/latency_smoke.jsonl
 
 cd ../frontend
 npm install
 npm run build
 ```
 
-The deterministic-rule evaluation harness reports precision, recall, F1 and false-positive/false-negative rates. The checked-in dataset contains only synthetic smoke examples; it is not a model accuracy benchmark. Use a separately labelled and held-out dataset for real evaluation.
+The evaluation tools report deterministic scam-rule precision/recall, transcript WER/CER, and latency percentiles. The checked-in datasets contain only synthetic smoke examples; they are not production model benchmarks. Use a separately labelled and held-out dataset for real evaluation.
 
 CI runs backend tests/lint, the rule smoke evaluation, and the frontend production build. Provider tests are mocked; live smoke tests require authorized credentials.
 
