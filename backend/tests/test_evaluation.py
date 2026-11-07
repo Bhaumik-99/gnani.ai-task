@@ -10,6 +10,7 @@ def test_wer_and_cer_casefold_and_tokenize_native_script():
     assert word_error_rate("Please share your OTP", "please share your otp") == 0
     assert word_error_rate("नमस्ते आप कैसे हैं", "नमस्ते आप कैसे") == pytest.approx(1 / 6)
     assert character_error_rate("hello", "hallo") == pytest.approx(0.2)
+    assert character_error_rate("hello world", "helloworld") > 0
 
 
 def test_empty_reference_metrics():
