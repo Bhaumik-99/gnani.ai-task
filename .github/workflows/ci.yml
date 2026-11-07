@@ -13,8 +13,9 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e "backend[dev]"
-      - run: ruff check backend/app backend/tests
+      - run: ruff check backend/app backend/tests backend/evaluation
       - run: cd backend && pytest -q
+      - run: cd backend && python -m evaluation.evaluate_rules --dataset evaluation/datasets/rules_smoke.jsonl
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -24,3 +25,10 @@ jobs:
           node-version: "20"
       - run: cd frontend && npm install
       - run: cd frontend && npm run build
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp backend/.env.example backend/.env
+      - run: cp .env.compose.example .env
+      - run: docker compose config --quiet
