@@ -4,7 +4,7 @@ from app.schemas import Evidence, ThreatResult
 
 _CREDENTIAL = re.compile(r"\b(?:one[- ]time password|otp|upi\s*pin|pin|cvv|cvc|password|passcode|card number|internet banking credentials)\b", re.I)
 _REQUEST = re.compile(r"\b(?:share|tell|send|give|read(?:\s+out)?|confirm|provide|enter|type|bata(?:iye|o)?|bhej(?:o)?|bol(?:iye|o)?)\b", re.I)
-_NEGATION = re.compile(r"\b(?:don't|do not|never|not|won't|will not|would not|mat|kabhi\s+mat|kabhi\s+nahi|na\s+share)\b", re.I)
+_NEGATION = re.compile(r"\b(?:don't|do not|never|not|avoid|won't|will not|would not|mat|kabhi\s+mat|kabhi\s+nahi|na\s+share)\b", re.I)
 _URGENCY = re.compile(r"\b(?:urgent|immediately|right now|unblock|blocked|block|suspend|freeze|turant|abhi|band)\b", re.I)
 _IMPERSONATION = re.compile(r"\b(?:bank|rbi|police|customs|courier|income tax|aadhaar|kyc)\b", re.I)
 _REMOTE = re.compile(r"\b(?:anydesk|teamviewer|screen sharing|remote access|apk)\b", re.I)
