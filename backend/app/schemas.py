@@ -3,13 +3,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SessionType = Literal["scam_demo", "assistant"]
-SessionLanguage = Literal["indic-auto", "hi-IN", "en-IN", "hi-IN,en-IN"]
+SessionLanguage = Literal["hi-IN", "en-IN"]
 
 
 class SessionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_type: SessionType
-    language: SessionLanguage = "indic-auto"
+    language: SessionLanguage = "hi-IN"
 
 
 class Evidence(BaseModel):
