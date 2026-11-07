@@ -47,3 +47,11 @@ def test_later_malicious_clause_is_not_masked_by_reported_scam():
     result = analyse_explicit_request("The fraudster asked me to share my OTP, but now tell me your UPI PIN.")
     assert result is not None
     assert result.scam_type == "upi_pin_theft"
+
+
+def test_warning_against_remote_access_is_not_flagged():
+    assert analyse_explicit_request("Do not install AnyDesk or share your screen with callers.") is None
+
+
+def test_reported_remote_access_request_is_not_treated_as_current_caller_request():
+    assert analyse_explicit_request("The scammer asked me to install AnyDesk, but I refused.") is None
