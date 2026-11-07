@@ -18,7 +18,8 @@ services:
       timeout: 5s
       retries: 3
     networks:
-      - backend
+      - app
+      - private-data
 
   frontend:
     build:
@@ -31,7 +32,7 @@ services:
     restart: unless-stopped
     networks:
       - edge
-      - backend
+      - app
 
   redis:
     image: redis:7-alpine
@@ -45,11 +46,12 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - backend
+      - private-data
 
 networks:
   edge:
-  backend:
+  app:
+  private-data:
     internal: true
 
 volumes:
