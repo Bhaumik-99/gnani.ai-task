@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main, "work/**"]
+    branches: [main, "work/**", "feat/**"]
   pull_request:
     branches: [main]
 jobs:
@@ -13,7 +13,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e "backend[dev]"
-      - run: cd backend && pytest
+      - run: ruff check backend/app backend/tests
+      - run: cd backend && pytest -q
   frontend:
     runs-on: ubuntu-latest
     steps:
