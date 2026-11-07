@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { Activity, ArrowLeft, AudioLines, CheckCircle2, ChevronRight, Headphones, Mic, MicOff, Phone, PhoneCall, PhoneOff, Shield, ShieldAlert, ShieldCheck, Volume2, VolumeX, Wifi } from "lucide-react";
-import { createSession, getConfig, socketUrl, type SessionType, type ThreatPayload } from "./api";
+import { createSession, getConfig, socketUrl, type SessionType, type ThreatPayload, type SessionLanguage } from "./api";
 import { PcmStreamPlayer, startPcmCapture, stopMicrophone, type CaptureController } from "./audio/capture";
 
 function Header() {
@@ -44,6 +44,7 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
   const [muted, setMuted] = useState(false);
   const [speakerMuted, setSpeakerMuted] = useState(false);
   const [sampleBusy, setSampleBusy] = useState(false);
+  const [language, setLanguage] = useState<SessionLanguage>("hi-IN");
   const [providerConfig, setProviderConfig] = useState<Awaited<ReturnType<typeof getConfig>> | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
   const socketRef = useRef<WebSocket | null>(null);
@@ -141,7 +142,7 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
           video: false
         });
       }
-      const session = await createSession(sessionType);
+      const session = await createSession(sessionType, language);
       const ws = new WebSocket(socketUrl(session.session_id), ["vaanishield.v1", `session.${session.token}`]);
       ws.binaryType = "arraybuffer";
       socketRef.current = ws;
@@ -307,7 +308,7 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
 
   return <main className="call-page">
     <button className="back-button" onClick={() => navigate("/")}><ArrowLeft size={16}/> Back to home</button>
-    {phase === "intro" && <section className="call-intro"><div className="intro-orb">{assistant ? <AudioLines size={34}/> : <ShieldAlert size={34}/>}</div><small>{assistant ? "VOICE CONVERSATION" : "SIMULATED INCOMING CALL"}</small><h1>{assistant ? "Talk to Vaani." : "Test your protection."}</h1><p>{assistant ? "Talk naturally in Hindi or English. Configure all three model services to enable live conversation." : "Start a simulated call, speak a fictional scenario, and inspect transcript and risk evidence."}</p><div className="permission-note"><Mic size={16}/> Microphone access is requested only when Prisma is configured and the session starts.</div>{assistant && !providerConfig?.assistant_enabled && <div className="permission-note">{configLoading ? "Checking provider readiness…" : "Configure Prisma, self-hosted Evon v3.3 and Timbre to enable voice conversations."}</div>}<button className="button primary" disabled={assistant && (configLoading || !providerConfig?.assistant_enabled)} onClick={() => setPhase("incoming")}>{assistant ? <Headphones size={17}/> : <PhoneCall size={17}/>} {assistant ? "Prepare voice session" : "Simulate incoming call"}</button></section>}
+    {phase === "intro" && <section className="call-intro"><div className="intro-orb">{assistant ? <AudioLines size={34}/> : <ShieldAlert size={34}/>}</div><small>{assistant ? "VOICE CONVERSATION" : "SIMULATED INCOMING CALL"}</small><h1>{assistant ? "Talk to Vaani." : "Test your protection."}</h1><p>{assistant ? "Talk naturally in Hindi or English. Configure all three model services to enable live conversation." : "Start a simulated call, speak a fictional scenario, and inspect transcript and risk evidence."}</p><div className="permission-note"><Mic size={16}/> Microphone access is requested only when Prisma is configured and the session starts.</div><label className="language-picker">Speech language<select value={language} onChange={event => setLanguage(event.target.value as SessionLanguage)}><option value="hi-IN">Hindi</option><option value="en-IN">English</option></select></label>{assistant && !providerConfig?.assistant_enabled && <div className="permission-note">{configLoading ? "Checking provider readiness…" : "Configure Prisma, self-hosted Evon v3.3 and Timbre to enable voice conversations."}</div>}<button className="button primary" disabled={assistant && (configLoading || !providerConfig?.assistant_enabled)} onClick={() => setPhase("incoming")}>{assistant ? <Headphones size={17}/> : <PhoneCall size={17}/>} {assistant ? "Prepare voice session" : "Simulate incoming call"}</button></section>}
     {phase === "incoming" && <section className="phone-shell"><div className="phone-top"><span>VAANISHIELD DEMO</span><span>•••</span></div><div className="caller-avatar"><PhoneCall size={28}/></div><small>{assistant ? "VOICE ASSISTANT" : "INCOMING DEMO CALL"}</small><h2>{assistant ? "Vaani Assistant" : "Unknown Caller"}</h2><p>{assistant ? "Hinglish · AI voice session" : "Simulated caller · Not a real phone call"}</p><div className="incoming-actions"><button className="decline" onClick={() => setPhase("intro")}><PhoneOff/></button><button className="accept" disabled={busy} onClick={acceptCall}><Phone/></button></div><div className="action-labels"><span>Cancel</span><span>{busy ? "Connecting…" : "Accept"}</span></div><div className="status-text">{status}</div></section>}
     {phase === "active" && <section className={`phone-shell active-shell ${threat ? "alert-shell" : ""}`}><div className="phone-top"><span>{assistant ? "VAANI ASSISTANT" : "SCAMSHIELD"}</span><span className="live-dot"/></div><div className="active-caller"><div className="caller-avatar">{assistant ? <AudioLines size={28}/> : <Shield size={28}/>}</div><h2>{assistant ? "Vaani" : "Unknown Caller"}</h2><p>{duration} · {status}</p></div>
       {threat && !assistant ? <div className="threat-alert"><div><ShieldAlert size={18}/> SCAM CALL DETECTED</div><h3>Do not share sensitive information.</h3><p>{threat.warning_message}</p><p>{threat.explanation}</p><div className="threat-meta"><b>{threat.scam_type.replace(/_/g, " ")}</b><b>{threat.risk_level.toUpperCase()}</b></div>{threat.evidence.map((item, index) => <small key={index}>• {item.text} · {item.category}</small>)}</div> : <div className="wave-panel"><div className="wave-bars"><Activity size={28}/></div><span>{assistant ? "Listening · responses require Evon and Timbre" : "Live Prisma transcription when configured"}</span></div>}
