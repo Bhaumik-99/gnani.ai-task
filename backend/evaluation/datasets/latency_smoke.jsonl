@@ -1,0 +1,3 @@
+{"id":"latency-1","stt_final_ms":210,"evon_ms":540,"tts_first_audio_ms":310,"end_to_end_ms":1060}
+{"id":"latency-2","stt_final_ms":245,"evon_ms":610,"tts_first_audio_ms":280,"end_to_end_ms":1135}
+{"id":"latency-3","stt_final_ms":190,"evon_ms":490,"tts_first_audio_ms":330,"end_to_end_ms":1010}
