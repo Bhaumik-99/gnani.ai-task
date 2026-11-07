@@ -19,7 +19,7 @@ export async function createSession(sessionType: SessionType) {
   const response = await fetch(`${API_BASE}/api/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_type: sessionType, language: "indic-auto" }),
+    body: JSON.stringify({ session_type: sessionType, language: "hi-IN" }),
   });
   if (!response.ok) throw new Error(response.status === 429 ? "Too many sessions. Try again shortly." : "Could not create a voice session.");
   return response.json() as Promise<{ session_id: string; session_type: SessionType; token: string; expires_in: number }>;
