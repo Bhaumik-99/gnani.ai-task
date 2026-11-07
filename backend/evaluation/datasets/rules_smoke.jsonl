@@ -1,0 +1,8 @@
+{"id":"smoke-1","text":"Please share your OTP to unblock your account immediately.","label":"scam"}
+{"id":"smoke-2","text":"Apna UPI PIN bataiye verification ke liye.","label":"scam"}
+{"id":"smoke-3","text":"Please install AnyDesk and allow remote access.","label":"scam"}
+{"id":"smoke-4","text":"Never share your OTP with anyone.","label":"benign"}
+{"id":"smoke-5","text":"Your bank statement is ready in the mobile app.","label":"benign"}
+{"id":"smoke-6","text":"The fraudster asked me to share my OTP, but I refused.","label":"benign"}
+{"id":"smoke-7","text":"Please tell me whether my OTP has arrived.","label":"benign"}
+{"id":"smoke-8","text":"Do not install AnyDesk or share your screen with callers.","label":"benign"}

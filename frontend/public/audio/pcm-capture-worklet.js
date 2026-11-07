@@ -3,15 +3,17 @@ function lowPassKernel(inputRate, outputRate, length = 63) {
   const normalized = cutoff / inputRate;
   const center = (length - 1) / 2;
   const taps = new Float32Array(length);
-  let total = 0;
+  let sum = 0;
   for (let i = 0; i < length; i += 1) {
     const offset = i - center;
-    const sinc = offset === 0 ? 2 * normalized : Math.sin(2 * Math.PI * normalized * offset) / (Math.PI * offset);
+    const sinc = offset === 0
+      ? 2 * normalized
+      : Math.sin(2 * Math.PI * normalized * offset) / (Math.PI * offset);
     const window = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (length - 1));
     taps[i] = sinc * window;
-    total += taps[i];
+    sum += taps[i];
   }
-  for (let i = 0; i < length; i += 1) taps[i] /= total;
+  for (let i = 0; i < length; i += 1) taps[i] /= sum;
   return taps;
 }
 
@@ -63,15 +65,21 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs) {
-    const input = inputs[0]?.[0];
+    const channels = inputs[0];
     const output = outputs[0]?.[0];
     if (output) output.fill(0);
-    if (!input) return true;
-    if (this.muted) return true;
+    if (!channels || channels.length === 0 || this.muted) return true;
 
+    const frameLength = channels[0].length;
     const ratio = sampleRate / this.targetRate;
-    for (let i = 0; i < input.length; i += 1) {
-      const filtered = this.filter(input[i]);
+    for (let i = 0; i < frameLength; i += 1) {
+      // Explicitly downmix every input channel to mono instead of silently discarding stereo.
+      let mono = 0;
+      for (let channel = 0; channel < channels.length; channel += 1) {
+        mono += channels[channel][i] || 0;
+      }
+      mono /= channels.length;
+      const filtered = this.filter(mono);
       const position = this.inputIndex;
       while (this.nextOutput <= position) {
         const fraction = position === 0 ? 0 : Math.max(0, Math.min(1, this.nextOutput - (position - 1)));
