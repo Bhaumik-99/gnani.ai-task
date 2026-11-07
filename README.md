@@ -97,14 +97,17 @@ The backend calls `/chat/completions`, keeps transcripts in untrusted user conte
 ```bash
 cd backend
 pytest -q
-ruff check app tests
+ruff check app tests evaluation
+python -m evaluation.evaluate_rules --dataset evaluation/datasets/rules_smoke.jsonl
 
 cd ../frontend
 npm install
 npm run build
 ```
 
-CI runs backend tests/lint and the frontend production build. Provider tests should be mocked in CI; perform live smoke tests separately with authorized credentials.
+The deterministic-rule evaluation harness reports precision, recall, F1 and false-positive/false-negative rates. The checked-in dataset contains only synthetic smoke examples; it is not a model accuracy benchmark. Use a separately labelled and held-out dataset for real evaluation.
+
+CI runs backend tests/lint, the rule smoke evaluation, and the frontend production build. Provider tests are mocked; live smoke tests require authorized credentials.
 
 ## Privacy and demo safety
 
