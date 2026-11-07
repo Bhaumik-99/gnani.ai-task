@@ -24,7 +24,7 @@ class TimbreStreamer:
             return
         async with websocket_connect(
             self.settings.timbre_ws_url,
-            additional_headers={"X-API-Key-ID": self.settings.gnani_api_key},
+            additional_headers={"X-API-Key-ID": self.settings.gnani_api_key, "Content-Type": "application/json"},
             open_timeout=10, ping_interval=20, ping_timeout=20,
             max_size=2_097_152, close_timeout=3,
         ) as ws:
