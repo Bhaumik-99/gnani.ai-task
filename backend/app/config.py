@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,16 +10,16 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     gnani_api_key: str = ""
-    prisma_model: str = "prisma-v3.0"
+    prisma_model: str = "prisma-v2.5"
     prisma_ws_url: str = "wss://api.vachana.ai/stt/v3/stream"
-    prisma_language_code: str = "indic-auto"
-    prisma_format: Literal["verbatim", "transcribe", "codemix", "transliterate"] = "codemix"
+    prisma_language_code: Literal["hi-IN", "en-IN"] = "hi-IN"
+    prisma_format: Literal["verbatim", "transcribe"] = "transcribe"
     prisma_sample_rate: Literal[8000, 16000] = 16000
     prisma_idle_timeout_seconds: int = Field(default=180, ge=5, le=900)
 
-    timbre_model: str = "timbre-v3.0"
+    timbre_model: str = "timbre-v2.5"
     timbre_ws_url: str = "wss://api.vachana.ai/api/v1/tts"
-    timbre_voice: str = "Shivani"
+    timbre_voice: str = "Nalini"
     timbre_language: str = "hi-en"
     timbre_sample_rate: Literal[8000, 16000, 22050, 24000, 44100, 48000] = 24000
 
@@ -37,18 +37,6 @@ class Settings(BaseSettings):
     max_tts_audio_bytes: int = Field(default=12_000_000, ge=1024, le=50_000_000)
     max_sessions_per_minute: int = Field(default=10, ge=1, le=100)
     redis_url: str = ""
-
-    @field_validator("prisma_ws_url", "timbre_ws_url")
-    @classmethod
-    def require_secure_provider_urls(cls, value: str) -> str:
-        if not value.startswith("wss://"):
-            raise ValueError("Gnani provider endpoints must use wss://")
-        return value
-
-    @field_validator("evon_base_url")
-    @classmethod
-    def normalize_evon_url(cls, value: str) -> str:
-        return value.strip().rstrip("/")
 
     @model_validator(mode="after")
     def validate_production_settings(self):
