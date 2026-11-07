@@ -31,3 +31,19 @@
 ## Release rule
 
 Do not claim production readiness, model accuracy, low latency or noise cancellation until those checks have been run with recorded test conditions and results. Warp is not integrated and no denoising feature is claimed.
+
+
+# Deployment with Docker Compose
+
+1. Copy `.env.compose.example` to repository-root `.env`.
+2. Copy `backend/.env.example` to `backend/.env`.
+3. Generate a unique random `SESSION_SIGNING_SECRET` with at least 32 characters. Set `GNANI_API_KEY` and configure `EVON_BASE_URL` if Evon is deployed.
+4. Start the app:
+
+```bash
+docker compose up --build
+```
+
+The browser application is published at `http://localhost:8080` (or `APP_PORT`). Nginx reverse-proxies API, health/readiness and WebSocket routes to FastAPI. FastAPI and Redis are not published to the host. The API has internet egress for Gnani endpoints and a private Redis-only network; Redis has no published port.
+
+For production, terminate TLS at a trusted ingress or load balancer, set `CORS_ORIGINS` to the exact HTTPS origin, and configure an HTTPS Evon endpoint. Do not use the example secrets. Back up and secure Redis persistence according to the deployment's retention policy.
