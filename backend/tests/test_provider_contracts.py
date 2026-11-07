@@ -123,7 +123,7 @@ async def test_timbre_sends_current_model_request_and_forwards_raw_pcm(monkeypat
     assert capture["additional_headers"]["X-API-Key-ID"] == "test-key"
     request = json.loads(socket.sent[0])
     assert request["model"] == "timbre-v2.5"
-    assert request["voice"] == "Nalini"
+    assert request["voice"] == "Poorvi"
     assert request["language"] == "hi-en"
     assert request["audio_config"]["encoding"] == "linear_pcm"
     assert request["audio_config"]["container"] == "raw"
