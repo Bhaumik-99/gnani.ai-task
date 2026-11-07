@@ -33,7 +33,7 @@ class FakeSocket:
         try:
             return next(self._iterator)
         except StopIteration:
-            raise StopAsyncIteration
+            raise StopAsyncIteration from None
 
 
 class FakeConnect:
