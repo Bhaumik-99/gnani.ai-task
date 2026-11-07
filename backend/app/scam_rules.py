@@ -1,5 +1,6 @@
 """Conservative local rules for an explicitly requested demo transcript."""
 import re
+
 from app.schemas import ThreatResult
 
 _CREDENTIAL = re.compile(r"\b(otp|one[- ]time password|upi\s*pin|password|passcode|cvv)\b", re.I)
