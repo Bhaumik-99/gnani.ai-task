@@ -12,7 +12,7 @@ class PrismaNotConfigured(RuntimeError):
 
 
 class PrismaStream:
-    """Prisma v3 realtime STT transport: raw mono PCM16LE binary frames."""
+    """Prisma realtime STT using the published raw mono PCM16LE WebSocket protocol."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -23,11 +23,9 @@ class PrismaStream:
             raise PrismaNotConfigured("GNANI_API_KEY is not configured")
         headers = {
             "x-api-key-id": self.settings.gnani_api_key,
-            "model": self.settings.prisma_model,
-            "language_code": language_code or self.settings.prisma_language_code,
-            "format": self.settings.prisma_format,
+            "lang_code": language_code or self.settings.prisma_language_code,
+            "x-format": self.settings.prisma_format,
             "x-sample-rate": str(self.settings.prisma_sample_rate),
-            "x-idle-timeout-sec": str(self.settings.prisma_idle_timeout_seconds),
         }
         self.connection = await websocket_connect(
             self.settings.prisma_ws_url, additional_headers=headers,
@@ -45,6 +43,9 @@ class PrismaStream:
                 raise RuntimeError(str(event.get("message", "Prisma connection failed")))
             if event.get("type") != "connected":
                 raise RuntimeError("Prisma did not return the connected event")
+            config = event.get("config") or {}
+            if config and config.get("sample_rate") != self.settings.prisma_sample_rate:
+                raise RuntimeError("Prisma sample rate does not match the configured input rate")
             return event
         except Exception:
             await self.close()
@@ -54,12 +55,8 @@ class PrismaStream:
         if self.connection is None:
             raise RuntimeError("Prisma is not connected")
         if len(frame) != 1024:
-            raise ValueError("Prisma audio frames must be exactly 1,024 bytes")
+            raise ValueError("Prisma frames must be exactly 1,024 bytes (512 PCM16 samples)")
         await self.connection.send(frame)
-
-    async def commit(self) -> None:
-        if self.connection is not None:
-            await self.connection.send(json.dumps({"type": "commit"}))
 
     async def events(self) -> AsyncIterator[dict]:
         if self.connection is None:
