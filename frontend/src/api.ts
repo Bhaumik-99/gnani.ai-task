@@ -1,6 +1,7 @@
 const API_BASE = (import.meta.env.VITE_API_BASE || window.location.origin).replace(/\/$/, "");
 
 export type SessionType = "scam_demo" | "assistant";
+export type SessionLanguage = "hi-IN" | "en-IN";
 export type ThreatEvidence = { text: string; category: string };
 export type ThreatPayload = {
   risk_level: "low" | "medium" | "high" | "critical";
@@ -15,11 +16,11 @@ export type ThreatPayload = {
   warning_message: string;
 };
 
-export async function createSession(sessionType: SessionType) {
+export async function createSession(sessionType: SessionType, language: SessionLanguage = "hi-IN") {
   const response = await fetch(`${API_BASE}/api/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_type: sessionType, language: "hi-IN" }),
+    body: JSON.stringify({ session_type: sessionType, language }),
   });
   if (!response.ok) throw new Error(response.status === 429 ? "Too many sessions. Try again shortly." : "Could not create a voice session.");
   return response.json() as Promise<{ session_id: string; session_type: SessionType; token: string; expires_in: number }>;
