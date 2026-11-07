@@ -2,7 +2,8 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from websockets.asyncio.client import ClientConnection, connect as websocket_connect
+from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.client import connect as websocket_connect
 
 from app.config import Settings
 
