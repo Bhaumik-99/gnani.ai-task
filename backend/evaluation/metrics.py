@@ -32,7 +32,9 @@ def word_error_rate(reference: str, hypothesis: str) -> float:
 
 
 def character_error_rate(reference: str, hypothesis: str) -> float:
-    left, right = list("".join(tokens(reference))), list("".join(tokens(hypothesis)))
+    # CER counts whitespace and punctuation too; only case and repeated whitespace are normalized.
+    left = list(" ".join(reference.casefold().split()))
+    right = list(" ".join(hypothesis.casefold().split()))
     return (edit_distance(left, right) / len(left)) if left else (0.0 if not right else 1.0)
 
 
