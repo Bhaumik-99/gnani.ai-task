@@ -31,7 +31,7 @@ Required header:
 
 Current API docs list Timbre v2.5. Request example used by this application:
 - `model: timbre-v2.5`
-- `voice: Nalini` (verify exact voice availability in your account catalog).
+- `voice: Poorvi` (verify exact voice availability in your account catalog).
 - `language: hi-en` for Hinglish.
 - `audio_config.sample_rate: 24000`
 - `num_channels: 1`
