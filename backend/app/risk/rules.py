@@ -35,15 +35,30 @@ def analyse_explicit_request(transcript: str) -> ThreatResult | None:
             break
     if selected is None:
         remote = _REMOTE.search(text)
-        if remote and re.search(r"\b(?:install|download|open|share|give|allow)\b", text, re.I):
-            return ThreatResult(
-                risk_level="high", risk_score=88, scam_detected=True, scam_type="remote_access_manipulation",
-                signals=["remote_access_request"],
-                evidence=[Evidence(text=remote.group(0), category="remote_access_request")],
-                explanation="The caller is asking the user to install or enable remote-access software.",
-                recommended_action="end_call",
-                warning_message="Do not install remote-access apps or share screen control with an unverified caller.",
+        if remote:
+            clause_start = text.rfind(".", 0, remote.start()) + 1
+            clause_end = min(
+                (position for position in (
+                    text.find(mark, remote.end()) for mark in ".!?;,"
+                ) if position >= 0),
+                default=len(text),
             )
+            remote_clause = text[clause_start:clause_end].strip()
+            remote_instruction = re.search(
+                r"\b(?:install|download|open|share|give|allow|enable|grant)\b",
+                remote_clause,
+                re.I,
+            )
+            is_reported = bool(_REPORTED.search(remote_clause))
+            if remote_instruction and not _negated(text, remote.start()) and not is_reported:
+                return ThreatResult(
+                    risk_level="high", risk_score=88, scam_detected=True, scam_type="remote_access_manipulation",
+                    signals=["remote_access_request"],
+                    evidence=[Evidence(text=remote_clause[:180], category="remote_access_request")],
+                    explanation="The caller is asking the user to install or enable remote-access software.",
+                    recommended_action="end_call",
+                    warning_message="Do not install remote-access apps or share screen control with an unverified caller.",
+                )
         return None
 
     credential = selected.group(0)
