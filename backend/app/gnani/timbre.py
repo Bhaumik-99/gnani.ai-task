@@ -71,7 +71,7 @@ class TimbreStreamer:
                         await send_audio(chunk)
                 elif kind == "error":
                     raise RuntimeError(str(event.get("message", "Timbre synthesis failed")))
-                elif kind == "complete":
+                elif kind == "complete" or (kind == "audio" and (event.get("data") or {}).get("is_final") is True):
                     completed = True
                     break
             if not completed and not (cancel_event and cancel_event.is_set()):
