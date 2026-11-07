@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     timbre_model: str = "timbre-v2.5"
     timbre_ws_url: str = "wss://api.vachana.ai/api/v1/tts"
-    timbre_voice: str = "Nalini"
+    timbre_voice: str = "Poorvi"
     timbre_language: str = "hi-en"
     timbre_sample_rate: Literal[8000, 16000, 22050, 24000, 44100, 48000] = 24000
 
