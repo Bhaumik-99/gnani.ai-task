@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     prisma_language_code: Literal["hi-IN", "en-IN"] = "hi-IN"
     prisma_format: Literal["verbatim", "transcribe"] = "transcribe"
     prisma_sample_rate: Literal[8000, 16000] = 16000
-    prisma_idle_timeout_seconds: int = Field(default=180, ge=5, le=900)
 
     timbre_model: str = "timbre-v2.5"
     timbre_ws_url: str = "wss://api.vachana.ai/api/v1/tts"
