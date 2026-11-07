@@ -372,9 +372,6 @@ async def session_socket(ws: WebSocket, session_id: str):
                     task.cancel()
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
-                if prisma:
-                    with suppress(Exception):
-                        await prisma.commit()
                 await send_json(ws, lock, "session.ended", {})
                 break
             else:
