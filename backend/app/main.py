@@ -13,6 +13,7 @@ from app.gnani.timbre import TimbreStreamer
 from app.risk.evon import EvonClient, EvonNotConfigured
 from app.risk.rules import analyse_explicit_request
 from app.schemas import SessionCreate, ThreatResult
+from app.sessions.rate_limit import normalize_client_ip
 from app.sessions.store import SessionStore
 from app.sessions.tokens import issue_session_token, verify_session_token
 
@@ -84,7 +85,7 @@ async def public_config():
 
 @app.post("/api/sessions")
 async def create_session(body: SessionCreate, request: Request):
-    client = request.client.host if request.client else "unknown"
+    client = normalize_client_ip(request.client.host if request.client else None)
     if not await store.allow_rate_limit(client, settings.max_sessions_per_minute):
         raise HTTPException(status_code=429, detail="Too many sessions created. Try again shortly.")
     session_id = str(uuid4())
@@ -154,17 +155,26 @@ async def analyse_turn(session_type: str, text: str, context: list[str], ws: Web
             await send_json(ws, lock, "analysis.status", {"mode": "uncertain", "reason": "Evon did not return structured JSON."})
             return
         try:
+            scam_detected = result.get("scam_detected")
+            if not isinstance(scam_detected, bool):
+                raise ValueError("scam_detected must be a boolean")
+            raw_signals = result.get("signals")
+            signals = (
+                [item.strip()[:64] for item in raw_signals[:12] if isinstance(item, str) and item.strip()]
+                if isinstance(raw_signals, list)
+                else []
+            )
             threat = ThreatResult.model_validate({
                 "risk_level": result.get("risk_level", "low"),
                 "risk_score": result.get("risk_score", 0),
                 "confidence": result.get("confidence"),
-                "scam_detected": result.get("scam_detected", False),
-                "scam_type": str(result.get("scam_type", "unknown"))[:80],
-                "signals": result.get("signals", [])[:12],
-                "evidence": [{"text": text[:240], "category": "model_context"}] if result.get("scam_detected") else [],
-                "explanation": str(result.get("explanation", ""))[:500],
+                "scam_detected": scam_detected,
+                "scam_type": str(result.get("scam_type") or "unknown")[:80],
+                "signals": signals,
+                "evidence": [{"text": text[:240], "category": "model_context"}] if scam_detected else [],
+                "explanation": str(result.get("explanation") or "")[:500],
                 "recommended_action": result.get("recommended_action", "continue_with_caution"),
-                "warning_message": str(result.get("warning_message", "Be cautious and do not share sensitive information."))[:300],
+                "warning_message": str(result.get("warning_message") or "Be cautious and do not share sensitive information.")[:300],
             })
         except Exception:
             await send_json(ws, lock, "analysis.status", {"mode": "uncertain", "reason": "Evon returned an invalid risk schema."})
@@ -209,14 +219,15 @@ async def session_socket(ws: WebSocket, session_id: str):
     offered = [item.strip() for item in ws.headers.get("sec-websocket-protocol", "").split(",")]
     token = next((item.removeprefix("session.") for item in offered if item.startswith("session.")), "")
     origin = ws.headers.get("origin")
-    session = await store.get(session_id)
-    if origin and origin.rstrip("/") not in settings.cors_origin_list:
+    if not origin or origin.rstrip("/") not in settings.cors_origin_list:
         await ws.close(code=4403, reason="Origin not allowed")
         return
+    session = await store.get(session_id)
     if not session or not verify_session_token(token, session_id, settings.session_signing_secret):
         await ws.close(code=4401, reason="Invalid or expired session capability")
         return
-    if not await store.claim(session_id):
+    claim_owner = uuid4().hex
+    if not await store.claim(session_id, owner=claim_owner):
         await ws.close(code=4409, reason="Session already has an active connection")
         return
 
@@ -391,5 +402,5 @@ async def session_socket(ws: WebSocket, session_id: str):
         if prisma:
             with suppress(Exception):
                 await prisma.close()
-        await store.release(session_id)
-        await store.delete(session_id)
+        if await store.release(session_id, owner=claim_owner):
+            await store.delete(session_id)

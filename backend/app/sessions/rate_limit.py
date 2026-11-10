@@ -1,5 +1,24 @@
+import ipaddress
 import time
 from collections import defaultdict, deque
+
+
+def normalize_client_ip(host: str | None) -> str:
+    """Normalize client IPs and aggregate IPv6 addresses to /64 prefixes for rate limiting."""
+    if not host:
+        return "unknown"
+    stripped = host.strip()
+    if not stripped:
+        return "unknown"
+    try:
+        addr = ipaddress.ip_address(stripped)
+    except ValueError:
+        return stripped
+    if isinstance(addr, ipaddress.IPv6Address):
+        if addr.ipv4_mapped:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.IPv6Network((addr, 64), strict=False))
+    return str(addr)
 
 
 class SlidingWindowLimiter:

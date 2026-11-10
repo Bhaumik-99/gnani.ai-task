@@ -1,8 +1,17 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _coerce_env_int(value: object) -> object:
+    """Coerce numeric env/.env strings before Literal[int] validation."""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped and stripped.lstrip("+-").isdigit():
+            return int(stripped)
+    return value
 
 
 class Settings(BaseSettings):
@@ -14,13 +23,13 @@ class Settings(BaseSettings):
     prisma_ws_url: str = "wss://api.vachana.ai/stt/v3/stream"
     prisma_language_code: Literal["hi-IN", "en-IN"] = "hi-IN"
     prisma_format: Literal["verbatim", "transcribe"] = "transcribe"
-    prisma_sample_rate: Literal[8000, 16000] = 16000
+    prisma_sample_rate: Annotated[Literal[8000, 16000], BeforeValidator(_coerce_env_int)] = 16000
 
     timbre_model: str = "timbre-v2.5"
     timbre_ws_url: str = "wss://api.vachana.ai/api/v1/tts"
     timbre_voice: str = "Poorvi"
     timbre_language: str = "hi-en"
-    timbre_sample_rate: Literal[8000, 16000, 22050, 24000, 44100, 48000] = 24000
+    timbre_sample_rate: Annotated[Literal[8000, 16000, 22050, 24000, 44100, 48000], BeforeValidator(_coerce_env_int)] = 24000
 
     # Evon v3.3 is served from its open weights through an OpenAI-compatible vLLM endpoint.
     evon_base_url: str = ""
@@ -31,7 +40,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     session_signing_secret: str = "development-only-change-this-secret"
     session_ttl_seconds: int = Field(default=840, ge=60, le=840)
-    max_audio_frame_bytes: Literal[1024] = 1024
+    max_audio_frame_bytes: Annotated[Literal[1024], BeforeValidator(_coerce_env_int)] = 1024
     max_transcript_chars: int = Field(default=4000, ge=200, le=12000)
     max_tts_audio_bytes: int = Field(default=12_000_000, ge=1024, le=50_000_000)
     max_sessions_per_minute: int = Field(default=10, ge=1, le=100)

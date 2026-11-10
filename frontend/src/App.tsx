@@ -8,9 +8,21 @@ function Header() {
   return <header className="topbar"><Link className="brand" to="/"><span className="brand-icon"><ShieldCheck size={20}/></span><span>vaani<span className="brand-muted">shield</span></span></Link><span className="demo-chip"><i/> SIMULATED CALL DEMO</span></header>;
 }
 
+function formatModelVersion(
+  config: Awaited<ReturnType<typeof getConfig>> | null,
+  providerName: string,
+  fallback: string,
+): string {
+  const model = config?.providers.find((item) => item.provider === providerName)?.model ?? "";
+  const match = model.match(/(v\d+(?:\.\d+)?)/i);
+  return match ? match[1] : fallback;
+}
+
 function Home() {
   const [config, setConfig] = useState<Awaited<ReturnType<typeof getConfig>> | null>(null);
   useEffect(() => { getConfig().then(setConfig).catch(() => setConfig(null)); }, []);
+  const prismaVersion = formatModelVersion(config, "prisma", "v2.5");
+  const timbreVersion = formatModelVersion(config, "timbre", "v2.5");
   return <main className="page">
     <section className="hero">
       <div className="eyebrow">REAL-TIME VOICE SECURITY</div>
@@ -23,7 +35,7 @@ function Home() {
       <Link to="/scam-demo" className="feature-card"><div className="feature-icon red"><ShieldAlert/></div><small>01 / PROTECTION</small><h2>ScamShield</h2><p>Simulate a suspicious call and inspect transcripts, deterministic evidence and optional contextual risk analysis.</p><b>Open simulator <ChevronRight size={15}/></b></Link>
       <Link to="/assistant" className="feature-card"><div className="feature-icon violet"><AudioLines/></div><small>02 / CONVERSATION</small><h2>Vaani Assistant</h2><p>A separate Hinglish voice session using Prisma, self-hosted Evon and Timbre speech generation.</p><b>Start a conversation <ChevronRight size={15}/></b></Link>
     </section>
-    <section className="model-strip"><div><small>GNANI MODEL STACK</small><h3>Built around Indian speech</h3></div><div className="models"><span><b>Prisma</b><small>STT · v3.0</small></span><span><b>Evon</b><small>Reasoning · v3.3</small></span><span><b>Timbre</b><small>TTS · v3.0</small></span></div></section>
+    <section className="model-strip"><div><small>GNANI MODEL STACK</small><h3>Built around Indian speech</h3></div><div className="models"><span><b>Prisma</b><small>STT · {prismaVersion}</small></span><span><b>Evon</b><small>Reasoning · v3.3</small></span><span><b>Timbre</b><small>TTS · {timbreVersion}</small></span></div></section>
     <section className="status-panel"><div><small>INTEGRATION STATUS</small><h3>Provider readiness</h3><p>{config?.note ?? "Backend status is unavailable."}</p></div><div className="provider-list">{config?.providers.map((item) => <div key={item.provider}><span>{item.provider} · {item.model}</span><strong className={item.configured ? "ready" : "pending"}>{item.configured ? "Configured" : "Not configured"}</strong></div>) ?? <span>Backend not connected</span>}</div></section>
     <footer>VaaniShield · Simulated call experience, not telecom call interception.</footer>
   </main>;

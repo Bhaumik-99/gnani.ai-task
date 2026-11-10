@@ -6,4 +6,6 @@ __pycache__/
 .ruff_cache/
 .env
 *.py[cod]
+*.egg-info/
+*.tsbuildinfo
 .DS_Store
