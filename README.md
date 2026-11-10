@@ -43,7 +43,7 @@ The product has two experiences: **ScamShield**, a simulated caller flow for sca
 | Shared session state | Redis-backed TTL store and rate limiting | Managed Redis or private production Redis |
 | Demo fallback | Synthetic text scenarios can exercise deterministic rules without model credentials | Keep demo scenarios fictional |
 
-**Important Evon integration note:** the current backend's `EvonClient` is written for an OpenAI-compatible chat-completions endpoint configured through `EVON_BASE_URL`. That is a remote endpoint; it does not require a model to run on the developer's PC. However, this adapter must not be described as the Gnani-managed Evon API integration until the endpoint, authentication method, payload, and response schema supplied for the user's Gnani account have been verified. Do not point it at a local model server. If Gnani's managed API uses a different contract, implement a dedicated provider adapter before enabling Evon.
+**Important Evon integration note:** the current backend's `EvonClient` is written for an OpenAI-compatible chat-completions endpoint configured through `EVON_BASE_URL`; it was originally documented for a vLLM-compatible deployment. That is a remote endpoint and does not require a model to run on the developer's PC, but it is not yet proof of integration with Gnani's managed Evon API. Gnani's public Evon page describes a selected closed beta via a waitlist, with general availability still to be announced. A standard Prisma/Timbre API key does not by itself establish Evon access. Before enabling Evon, verify that the account is selected for the beta and use the endpoint, authentication method, payload, and response schema supplied by Gnani. Do not point it at a local model server. If the managed API contract differs from the current OpenAI-compatible adapter, implement a dedicated Gnani Evon adapter.
 
 ## Architecture
 
@@ -377,7 +377,7 @@ A configured key or endpoint is not proof that a provider is reachable, entitled
 - [Gnani API quick start](https://docs.gnani.ai/api/introduction/quick-start)
 - [Prisma realtime STT](https://docs.gnani.ai/api/STT/stt-websocket)
 - [Timbre realtime TTS](https://docs.gnani.ai/api/TTS/tts-websocket)
-- [Evon v3.3 hosted API waitlist and beta information](https://www.gnani.ai/evon-waitlist)
+- [Evon v3.3 hosted API waitlist and closed-beta information](https://www.gnani.ai/evon-waitlist)
 - [Evon v3.3 open-weight model card](https://huggingface.co/gnani/gnani-evon-v3.3-30B-A3B)
 
 ---
