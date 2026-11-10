@@ -115,3 +115,21 @@ def test_threat_result_rejects_semantic_contradictions():
             recommended_action="continue_with_caution",
             warning_message="Warning",
         )
+
+
+def test_devanagari_hindi_and_spaced_asr_scam_rules():
+    otp_hi = analyse_explicit_request("कृपया अपना ओटीपी बताइए।")
+    assert otp_hi is not None and otp_hi.scam_type == "otp_harvesting" and otp_hi.risk_level == "critical"
+
+    pin_hi = analyse_explicit_request("अपना यूपीआई पिन बता दो।")
+    assert pin_hi is not None and pin_hi.scam_type == "upi_pin_theft" and pin_hi.risk_level == "critical"
+
+    remote_hi = analyse_explicit_request("एनीडेस्क इंस्टॉल करो।")
+    assert remote_hi is not None and remote_hi.scam_type == "remote_access_manipulation" and remote_hi.risk_level == "high"
+
+    otp_spaced = analyse_explicit_request("Sir apna O T P batao")
+    assert otp_spaced is not None and otp_spaced.scam_type == "otp_harvesting"
+
+    assert analyse_explicit_request("अपना ओटीपी मत बताना।") is None
+    assert analyse_explicit_request("स्कैमर ने मुझसे ओटीपी माँगा।") is None
+    assert analyse_explicit_request("मैंने कल एनीडेस्क इंस्टॉल किया था।") is None

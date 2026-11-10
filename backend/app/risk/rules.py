@@ -2,45 +2,68 @@ import re
 
 from app.schemas import Evidence, ThreatResult
 
-_CREDENTIAL = re.compile(
-    r"\b(?:one[- ]time password|otp|upi\s*pin|pin|cvv|cvc|password|passcode|card number|internet banking credentials)\b",
-    re.I,
+_L = r"(?<![A-Za-z0-9\u0900-\u097F])"
+_R = r"(?![A-Za-z0-9\u0900-\u097F])"
+
+
+def _u(pattern: str) -> re.Pattern[str]:
+    return re.compile(f"{_L}(?:{pattern}){_R}", re.I)
+
+
+_CREDENTIAL = _u(
+    r"one[- ]time password|o\s*t\s*p|u\s*p\s*i\s*pin|mpin|pin|cvv|cvc|password|passcode|card number|internet banking credentials"
+    r"|ओटीपी|वन\s*टाइम\s*पासवर्ड|यूपीआई\s*पिन|एमपिन|पिन|सीवीवी|सीवीसी|पासवर्ड|पासकोड|कार्ड\s*नंबर"
 )
-_REQUEST = re.compile(
-    r"\b(?:share|tell|send|give|read(?:\s+out)?|confirm|provide|enter|type|bata(?:iye|o|na)?|bhej(?:o|iye|na)?|bol(?:iye|o|na)?|de(?:na|jiye|\s+do|\s+dijiye)?)\b",
-    re.I,
+_REQUEST = _u(
+    r"share|tell|send|give|read(?:\s+out)?|confirm|provide|enter|type"
+    r"|bata(?:iye|o|na)?|bhej(?:o|iye|na)?|bol(?:iye|o|na)?|de(?:na|jiye|\s+do|\s+dijiye)?"
+    r"|बताइए|बताइये|बताओ|बता\s*दो|बता\s*देना|बोलिए|बोलो|भेजिए|भेजो|भेज\s*दो|भेज\s*देना|दीजिए|दे\s*दो|शेयर|दर्ज|डालो|एंटर"
 )
-_ANAPHORA = re.compile(r"\b(?:yours|it|that|same|woh|wo|uska|apna\s+wala)\b", re.I)
-_REASSURANCE = re.compile(
-    r"\b(?:don't|do not)\s+(?:worry|panic|be afraid)|no\s+(?:worries|problem)|(?:chinta|tension|fikar)\s+(?:mat|na)\s+(?:karo|lo|kijiye)|ghabrao\s+mat\b",
-    re.I,
+_ANAPHORA = _u(r"yours|it|that|same|woh|wo|uska|apna\s+wala|वह|वो|उसको|उसे|अपना\s*वाला")
+_REASSURANCE = _u(
+    r"(?:don't|do not)\s+(?:worry|panic|be afraid)|no\s+(?:worries|problem)"
+    r"|(?:chinta|tension|fikar)\s+(?:mat|na)\s+(?:karo|lo|kijiye)|ghabrao\s+mat"
+    r"|(?:चिंता|टेंशन|फिक्र)\s+(?:मत|ना)\s+(?:करो|लो|कीजिए)|घबराओ\s+मत"
 )
-_NEGATION = re.compile(
-    r"\b(?:don't|do not|never|not|avoid|won't|will not|would not|should not|shouldn't|mat|kabhi\s+mat|kabhi\s+nahi|nahi\s+(?:batana|bhejna|dena|share)|na\s+(?:share|batana|bhejna|dena|batao|bhejo))\b",
-    re.I,
+_NEGATION = _u(
+    r"don't|do not|never|not|avoid|won't|will not|would not|should not|shouldn't"
+    r"|mat|kabhi\s+mat|kabhi\s+nahi|nahi\s+(?:batana|bhejna|dena|share)|na\s+(?:share|batana|bhejna|dena|batao|bhejo)"
+    r"|मत|कभी\s+मत|कभी\s+नहीं|मना|साझा\s+न\s+करें|नहीं\s+(?:बताना|भेजना|देना|शेयर)|न\s+(?:बताएं|बताओ|भेजें|शेयर)"
 )
-_URGENCY = re.compile(r"\b(?:urgent|immediately|right now|unblock|blocked|block|suspend|freeze|turant|abhi|band)\b", re.I)
-_IMPERSONATION = re.compile(r"\b(?:bank|rbi|police|customs|courier|income tax|aadhaar|kyc)\b", re.I)
-_REMOTE = re.compile(r"\b(?:anydesk|teamviewer|screen sharing|remote access|apk)\b", re.I)
-_REMOTE_INSTRUCTION = re.compile(r"\b(?:install|download|open|share|give|allow|enable|grant)\b", re.I)
-_REMOTE_PAST_OR_SELF = re.compile(
-    r"\b(?:i|we)\s+(?:have\s+|had\s+|already\s+)?(?:installed|downloaded|used|opened|enabled)\b",
-    re.I,
+_URGENCY = _u(
+    r"urgent|immediately|right now|unblock|blocked|block|suspend|freeze|turant|abhi|band"
+    r"|तुरंत|अभी|फौरन|जल्दी|ब्लॉक|बंद|फ्रीज|सस्पेंड"
 )
-_REPORTED = re.compile(
-    r"\b(?:the\s+)?(?:scammer|fraudster|caller|person|someone|he|she|they)\s+(?:asked|told|said|requested)\s+(?:me|us|him|her|them)\b"
-    r"|\b(?:i|we)\s+(?:was|were)\s+(?:asked|told)\s+(?:to|for)\b"
-    r"|\b(?:caller|scammer|fraudster|kisi)\s+ne\s+(?:mujhse|humse)\b",
-    re.I,
+_IMPERSONATION = _u(
+    r"bank|rbi|police|customs|courier|income tax|aadhaar|kyc"
+    r"|बैंक|आरबीआई|पुलिस|कस्टम्स|कूरियर|इनकम\s*टैक्स|आधार|केवाईसी"
 )
-_OTP_STATUS = re.compile(
-    r"\b(?:tell me|check|confirm)\s+(?:whether|if)\s+(?:my|the)\s+otp\s+(?:has\s+)?(?:arrived|arrive|been received|was received|came|come)\b"
-    r"|\b(?:did|has)\s+(?:my|the)\s+otp\s+(?:arrived|arrive|come)\b"
-    r"|\botp\s+(?:aaya|aa\s+gaya)\s+kya\b",
-    re.I,
+_REMOTE = _u(
+    r"any\s*desk|team\s*viewer|screen sharing|remote access|apk"
+    r"|एनी\s*डेस्क|टीम\s*व्यूअर|स्क्रीन\s*शेयर(?:िंग)?|रिमोट\s*एक्सेस|एपीके"
+)
+_REMOTE_INSTRUCTION = _u(
+    r"install|download|open|share|give|allow|enable|grant"
+    r"|इंस्टॉल|डाउनलोड|खोलो|खोलिए|चालू|अलाउ|ऑन"
+)
+_REMOTE_PAST_OR_SELF = _u(
+    r"(?:i|we)\s+(?:have\s+|had\s+|already\s+)?(?:installed|downloaded|used|opened|enabled)"
+    r"|(?:मैंने|हमने).*(?:किया\s+था|था|चुका\s+हूँ|चुके\s+हैं)"
+)
+_REPORTED = _u(
+    r"(?:the\s+)?(?:scammer|fraudster|caller|person|someone|he|she|they)\s+(?:asked|told|said|requested)\s+(?:me|us|him|her|them)"
+    r"|(?:i|we)\s+(?:was|were)\s+(?:asked|told)\s+(?:to|for)"
+    r"|(?:caller|scammer|fraudster|kisi)\s+ne\s+(?:mujhse|humse)"
+    r"|(?:स्कैमर|फ्रॉड|कॉलर|किसी|उसने|उन्होंने)\s+ने\s+(?:मुझसे|हमसे|मुझे|हमें)"
+)
+_OTP_STATUS = _u(
+    r"(?:tell me|check|confirm)\s+(?:whether|if)\s+(?:my|the)\s+(?:otp|o\s*t\s*p)\s+(?:has\s+)?(?:arrived|arrive|been received|was received|came|come)"
+    r"|(?:did|has)\s+(?:my|the)\s+(?:otp|o\s*t\s*p)\s+(?:arrived|arrive|come)"
+    r"|otp\s+(?:aaya|aa\s+gaya)\s+kya"
+    r"|(?:ओटीपी|मेरा\s+ओटीपी)\s+(?:आया|आ\s+गया)\s+(?:क्या|या\s+नहीं)"
 )
 _CLAUSE_SPLIT = re.compile(
-    r"[.!?;,:]|\b(?:but|however|although|though|yet|instead|actually|lekin|par|magar)\b",
+    r"[.!?;,।:]|\b(?:but|however|although|though|yet|instead|actually|lekin|par|magar)\b|(?<![A-Za-z0-9\u0900-\u097F])(?:लेकिन|पर|मगर)(?![A-Za-z0-9\u0900-\u097F])",
     re.I,
 )
 
@@ -55,10 +78,10 @@ def _clause_is_negated(clause: str) -> bool:
 
 
 def _credential_category(credential: str) -> str:
-    normalized = credential.lower().replace(" ", "_")
-    if "upi" in normalized or normalized == "pin":
+    compact = re.sub(r"[\s-]+", "", credential.lower())
+    if any(token in compact for token in ("upipin", "upi", "mpin", "यूपीआई", "एमपिन")) or compact in {"pin", "पिन"}:
         return "upi_pin_theft"
-    if "otp" in normalized or "one-time" in normalized:
+    if any(token in compact for token in ("otp", "onetimepassword", "ओटीपी", "वनटाइमपासवर्ड")):
         return "otp_harvesting"
     return "credential_harvesting"
 

@@ -1,5 +1,6 @@
 export type CaptureController = {
   setMuted: (muted: boolean) => void;
+  setDucking: (active: boolean) => void;
   stop: () => void;
 };
 
@@ -33,6 +34,7 @@ export async function startPcmCapture(
     let stopped = false;
     return {
       setMuted: (muted) => node?.port.postMessage({ type: "mute", value: muted }),
+      setDucking: (active) => node?.port.postMessage({ type: "tts_playing", value: active }),
       stop: () => {
         if (stopped) return;
         stopped = true;
@@ -61,11 +63,13 @@ export function stopMicrophone(stream?: MediaStream): void {
 export class PcmStreamPlayer {
   private readonly context: AudioContext;
   private readonly sources = new Set<AudioBufferSourceNode>();
+  private readonly onPlaybackChange?: (playing: boolean) => void;
   private nextStart = 0;
   private muted = false;
 
-  constructor(context: AudioContext) {
+  constructor(context: AudioContext, onPlaybackChange?: (playing: boolean) => void) {
     this.context = context;
+    this.onPlaybackChange = onPlaybackChange;
   }
 
   setMuted(muted: boolean): void {
@@ -76,7 +80,9 @@ export class PcmStreamPlayer {
   enqueuePcm16(data: ArrayBuffer, sampleRate: number): boolean {
     if (this.muted) return true;
     if (!data.byteLength || data.byteLength % 2 !== 0 || !Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 48000) return false;
-    if (this.nextStart - this.context.currentTime > 4) return false;
+    if (this.context.state === "suspended") void this.context.resume();
+    // Timbre delivers PCM chunks faster than real time; allow up to 120s of buffered speech.
+    if (this.nextStart - this.context.currentTime > 120) return false;
     const view = new DataView(data);
     const samples = new Float32Array(data.byteLength / 2);
     for (let index = 0; index < samples.length; index += 1) {
@@ -89,18 +95,25 @@ export class PcmStreamPlayer {
     source.connect(this.context.destination);
     const startAt = Math.max(this.context.currentTime + 0.025, this.nextStart);
     this.nextStart = startAt + buffer.duration;
+    const wasEmpty = this.sources.size === 0;
     this.sources.add(source);
-    source.onended = () => this.sources.delete(source);
+    if (wasEmpty) this.onPlaybackChange?.(true);
+    source.onended = () => {
+      this.sources.delete(source);
+      if (this.sources.size === 0) this.onPlaybackChange?.(false);
+    };
     source.start(startAt);
     return true;
   }
 
   stop(): void {
+    const hadSources = this.sources.size > 0;
     for (const source of this.sources) {
       try { source.stop(); } catch { /* The source may already have ended. */ }
       source.disconnect();
     }
     this.sources.clear();
     this.nextStart = this.context.currentTime;
+    if (hadSources) this.onPlaybackChange?.(false);
   }
 }

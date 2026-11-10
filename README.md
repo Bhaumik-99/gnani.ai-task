@@ -34,132 +34,158 @@ The product has two experiences: **ScamShield**, a simulated caller flow for sca
 
 | Capability | Current implementation | What is still required |
 |---|---|---|
-| Realtime speech recognition | Prisma realtime WebSocket adapter | Valid Gnani API credentials, entitlement, and live account test |
-| Browser audio capture | AudioWorklet capture, filtering, resampling, and PCM16 framing | HTTPS or localhost browser context and microphone permission |
-| Scam pattern detection | Deterministic rules for explicit credential and remote-access requests | Broader labelled evaluation and tuning |
-| Contextual scam analysis | Evon client using an OpenAI-compatible remote `/chat/completions` endpoint | Confirm the Gnani-hosted Evon endpoint and adapt the provider request/response contract if it differs |
-| Spoken warnings and replies | Timbre realtime TTS adapter and PCM playback | Confirm voice availability and validate live account access |
-| Session security | Short-lived HMAC capability, Origin validation, one-socket claim, and TTL | Production secrets, explicit origins, TLS, and deployment verification |
-| Shared session state | Redis-backed TTL store and rate limiting | Managed Redis or private production Redis |
-| Demo fallback | Synthetic text scenarios can exercise deterministic rules without model credentials | Keep demo scenarios fictional |
+| Realtime speech recognition | Prisma realtime WebSocket adapter (`hi-IN` / `en-IN`) | Valid Gnani API credentials, entitlement, and live account test |
+| Browser audio capture & DSP | WebRTC AEC/NS/AGC + AudioWorklet 85 Hz Butterworth HPF, adaptive soft noise gate with TTS ducking, anti-alias filter, resampling, and PCM16 framing | HTTPS or localhost browser context and microphone permission |
+| Scam pattern detection | Multilingual deterministic rules (English, Hinglish, Devanagari) with negation/reported-speech guards and cross-turn split-phrase detection across both ScamShield and Vaani Assistant | Broader labelled evaluation and tuning |
+| Contextual scam analysis | Pooled `EvonClient` calling an OpenAI-compatible `/chat/completions` endpoint with semantic consistency validation | Confirm the Gnani-hosted Evon endpoint and adapt the provider request/response contract if it differs |
+| Spoken warnings and replies | Timbre v2.5 realtime TTS adapter (`is_final` and `complete` support) and 120s-buffered PCM playback | Confirm voice availability and validate live account access |
+| Session security | Short-lived HMAC capability, required WebSocket `Origin` enforcement, expiring ownership-aware socket lease, and TTL | Production secrets, explicit origins, TLS, and deployment verification |
+| Shared session state | Redis-backed TTL store, Lua ownership lease release, sorted-set (`ZSET`) sliding-window rate limiting, and IPv6 `/64` normalization | Managed Redis or private production Redis |
+| Protocol test hook | Backend `transcript.demo` WebSocket event for automated rule tests (live call UI streams microphone speech directly) | Keep test scenarios fictional |
 
-**Important Evon integration note:** the current backend's `EvonClient` is written for an OpenAI-compatible chat-completions endpoint configured through `EVON_BASE_URL`; it was originally documented for a vLLM-compatible deployment. That is a remote endpoint and does not require a model to run on the developer's PC, but it is not yet proof of integration with Gnani's managed Evon API. Gnani's public Evon page describes a selected closed beta via a waitlist, with general availability still to be announced. A standard Prisma/Timbre API key does not by itself establish Evon access. Before enabling Evon, verify that the account is selected for the beta and use the endpoint, authentication method, payload, and response schema supplied by Gnani. Do not point it at a local model server. If the managed API contract differs from the current OpenAI-compatible adapter, implement a dedicated Gnani Evon adapter.
+**Important Evon integration note:** the current backend's `EvonClient` is written for an OpenAI-compatible `/chat/completions` endpoint configured through `EVON_BASE_URL` (tested with vLLM-compatible and local Ollama dev endpoints). That does not yet prove integration with Gnani's managed Evon API. Gnani's public Evon page describes a selected closed beta via a waitlist, with general availability still to be announced. A standard Prisma/Timbre API key does not by itself establish Evon access. Before enabling managed Evon in production, verify account selection and use the endpoint, authentication method, payload, and response schema supplied by Gnani. If the managed API contract differs from the current OpenAI-compatible adapter, implement a dedicated Gnani Evon adapter.
 
 ## Architecture
 
-### 1. Cloud system architecture
+### 1. System & audio-security architecture
 
-The browser handles microphone capture and audio playback. Application orchestration runs in the backend. Speech and reasoning inference are performed by remote provider services; no model process or model weights are required on the user's PC.
+The browser handles microphone capture, lightweight AudioWorklet DSP, and audio playback. Application orchestration runs in the backend. Speech and reasoning inference run over remote provider APIs in production (or an optional local OpenAI-compatible server such as Ollama during local development).
 
 ```mermaid
 flowchart LR
-  subgraph CLIENT["User device — browser only"]
+  subgraph CLIENT["User device — browser"]
     UI["React UI<br/>ScamShield + Vaani Assistant"]
-    CAP["AudioWorklet<br/>capture, filter, resample, PCM16"]
-    PLAY["PCM audio player"]
+    CAP["AudioWorklet<br/>85 Hz HPF, adaptive soft gate,<br/>anti-alias resample, PCM16"]
+    PLAY["PCM audio player<br/>(120s jitter/burst buffer)"]
     UI --> CAP
+    PLAY -.->|"tts_playing ducking"| CAP
     PLAY --> UI
   end
 
-  subgraph APP["VaaniShield application — cloud runtime"]
+  subgraph APP["VaaniShield application — FastAPI runtime"]
     GW["FastAPI HTTP / WebSocket gateway"]
-    AUTH["Session capability<br/>Origin and connection checks"]
-    TURN["Per-session turn manager"]
-    RULES["Deterministic scam rules"]
-    STORE[("Redis<br/>TTL sessions and rate limits")]
+    AUTH["Session capability<br/>Required Origin & lease checks"]
+    TURN["Per-session turn orchestrator"]
+    RULES["Multilingual scam rules<br/>(EN, Hinglish, Devanagari + split-turn)"]
+    VALID["ThreatResult semantic validator"]
+    STORE[("Redis<br/>TTL sessions, leases, ZSET limiter")]
     GW --> AUTH --> TURN
-    TURN --> RULES
+    TURN --> RULES --> VALID
     TURN <--> STORE
   end
 
-  subgraph PROVIDERS["Remote AI services"]
+  subgraph PROVIDERS["AI inference services"]
     STT["Gnani Prisma<br/>realtime speech-to-text"]
-    LLM["Gnani Evon<br/>hosted reasoning API<br/>(account access + adapter required)"]
+    LLM["Evon v3.3 / OpenAI-compatible /v1<br/>(pooled HTTP client)"]
     TTS["Gnani Timbre<br/>realtime text-to-speech"]
   end
 
-  CAP -->|"PCM16 audio frames over WSS"| GW
+  CAP -->|"1,024-byte PCM16 frames over WSS"| GW
   TURN <-->|"audio stream / transcript events"| STT
-  RULES -->|"explicit signal"| TURN
-  TURN -.->|"ambiguous context; when enabled"| LLM
+  TURN -.->|"contextual classification or reply"| LLM
+  LLM --> VALID
+  VALID -->|"threat.detected / status"| UI
   TURN -->|"warning or assistant text"| TTS
-  TTS -->|"PCM audio chunks"| GW
+  TTS -->|"PCM16 audio chunks"| GW
   GW -->|"binary audio"| PLAY
 ```
 
-**Inference boundary:** local development may run Vite and FastAPI on localhost, but that does not mean an AI model is hosted locally. Configure provider endpoints and credentials on the backend. Do not download model weights or expose provider keys in frontend variables.
+**Inference boundary:** in production, speech and reasoning inference run remotely (`EVON_BASE_URL` must use `https://` when `ENVIRONMENT=production`). For local development without GPU access, `EVON_BASE_URL` can point to a local OpenAI-compatible server such as Ollama. Never expose provider keys in `VITE_*` frontend variables.
 
-### 2. ScamShield detection sequence
+### 2. ScamShield live-call detection sequence
 
-ScamShield runs deterministic checks before optional contextual reasoning. An explicit high-risk signal can trigger a warning without waiting for the LLM. Ambiguous turns can use the configured remote reasoning provider; if that provider is unavailable, deterministic protection remains active.
+ScamShield automatically monitors speech throughout the call. Explicit credential or remote-access demands (including Devanagari Hindi and phrases split across VAD pauses) trigger warnings in `<1 ms` without cancelling in-flight contextual LLM checks on earlier turns.
 
 ```mermaid
 sequenceDiagram
   autonumber
   actor User
-  participant Browser
-  participant API as FastAPI gateway
-  participant STT as Gnani Prisma
-  participant Rules as Scam rules
-  participant LLM as Remote Evon API
-  participant TTS as Gnani Timbre
+  participant Browser as Browser Mic & AudioWorklet
+  participant API as FastAPI Gateway
+  participant STT as Gnani Prisma STT
+  participant Rules as Multilingual Rules
+  participant LLM as Pooled Evon / OpenAI Client
+  participant TTS as Gnani Timbre TTS
 
   User->>Browser: Speak in simulated call
-  Browser->>API: PCM16 audio frames over WSS
+  Browser->>Browser: WebRTC AEC/NS + 85 Hz HPF + adaptive gate
+  Browser->>API: 1,024-byte PCM16 frames over WSS
   API->>STT: Forward realtime audio
   STT-->>API: Final transcript segment
-  API->>Rules: Evaluate explicit scam patterns
+  API-->>Browser: transcript.final
+  API->>Rules: Check current turn + adjacent split-turn context
   alt Explicit credential or remote-access signal
-    Rules-->>API: Risk evidence and warning
-  else Ambiguous conversation
+    Rules-->>API: ThreatResult (critical / high)
+  else Ambiguous turn (serialized without cancelling prior turns)
     API->>LLM: Transcript and bounded context
-    LLM-->>API: Structured risk assessment
+    LLM-->>API: JSON risk assessment (semantically validated)
   end
-  API-->>Browser: Transcript and risk/status event
-  API->>TTS: Spoken warning (when required)
-  TTS-->>API: Realtime PCM audio chunks
+  API-->>Browser: threat.detected or analysis.status
+  API->>TTS: Spoken warning (when scam detected)
+  TTS-->>API: Realtime PCM16 audio chunks
   API-->>Browser: Stream warning audio
-  Browser-->>User: Show alert and play warning
+  Browser->>Browser: Play warning & raise AudioWorklet ducking gate
 ```
 
-### 3. Vaani Assistant voice sequence
+### 3. Vaani Assistant voice & protection sequence
 
-Vaani Assistant is a separate session from the simulated scam flow. It uses the same speech transport but keeps its own transcript context and cancellation state.
+Vaani Assistant keeps its own multi-turn conversation history and barge-in cancellation while still running automatic live scam detection on incoming utterances.
 
 ```mermaid
 sequenceDiagram
   autonumber
   actor User
-  participant Browser
-  participant API as FastAPI turn manager
-  participant STT as Gnani Prisma
-  participant LLM as Remote reasoning API
-  participant TTS as Gnani Timbre
+  participant Browser as Browser Mic & Player
+  participant API as FastAPI Turn Manager
+  participant STT as Gnani Prisma STT
+  participant Rules as Multilingual Rules
+  participant LLM as Pooled Evon / OpenAI Client
+  participant TTS as Gnani Timbre TTS
 
-  User->>Browser: Ask a question
-  Browser->>API: Stream microphone audio
+  User->>Browser: Speak during voice call
+  Browser->>API: Stream 1,024-byte PCM16 frames
   API->>STT: Forward audio frames
   STT-->>API: Final transcript
-  API->>LLM: User turn and bounded context
-  LLM-->>API: Assistant text
-  API-->>Browser: assistant.message
-  API->>TTS: Synthesize assistant response
-  TTS-->>API: PCM audio chunks
-  API-->>Browser: Stream audio chunks
-  Browser-->>User: Play spoken response
-  Note over Browser,API: A replacement turn or interruption cancels the active turn and flushes queued audio.
+  API-->>Browser: transcript.final
+  API->>Rules: Instant explicit scam check
+  alt Explicit scam demand detected
+    Rules-->>API: ThreatResult + warning message
+    API-->>Browser: threat.detected + assistant.message
+    API->>TTS: Synthesize spoken scam warning
+  else Normal or ambiguous turn
+    API->>LLM: Multi-turn chat messages (bounded history)
+    LLM-->>API: Spoken reply text
+    API-->>Browser: assistant.message
+    opt Suspicious keywords detected
+      API--)LLM: Non-blocking background scam classification
+      LLM--)API: threat.detected (if scam confirmed)
+    end
+    API->>TTS: Synthesize assistant response
+  end
+  TTS-->>API: PCM16 audio chunks
+  API-->>Browser: audio.output.start + binary PCM chunks
+  Browser->>Browser: Play full response (120s buffer) + duck mic gate
+  Note over Browser,API: Manual interrupt or replacement user speech cancels the active reply and flushes queued audio.
 ```
 
 ## Runtime behaviour
 
-1. The user starts a session and grants microphone permission.
-2. The browser AudioWorklet captures mono audio, filters/resamples it, and emits PCM16LE frames.
-3. The frontend opens an authenticated WebSocket to FastAPI and streams bounded binary frames.
+1. The user starts a session and grants microphone permission (with WebRTC AEC/NS/AGC enabled).
+2. The browser AudioWorklet runs an 85 Hz Butterworth high-pass filter, an adaptive noise-floor soft gate (with 300 ms hangover and TTS playback ducking), and anti-alias resampling to emit 1,024-byte mono PCM16LE frames.
+3. The frontend opens an `Origin`-validated, HMAC-authenticated WebSocket to FastAPI and streams bounded binary frames.
 4. FastAPI forwards audio to Prisma and receives transcript events.
-5. ScamShield evaluates deterministic rules immediately. Only ambiguous turns need contextual model analysis.
-6. Vaani Assistant sends completed turns to the configured remote reasoning provider.
-7. Warnings and assistant responses are sent to Timbre; returned PCM chunks are streamed to the browser.
-8. On interruption, turn replacement, disconnect, or expiry, active tasks and audio streams are cancelled.
+5. **ScamShield** checks English, Hinglish, and Devanagari deterministic rules (including adjacent VAD-split turns) immediately; ambiguous turns run sequentially through the pooled LLM client with semantic validation without cancelling earlier in-flight checks.
+6. **Vaani Assistant** runs instant deterministic scam checks first, generates clean multi-turn conversational replies, runs non-blocking contextual scam classification when suspicious cues appear, and streams spoken audio via Timbre v2.5.
+7. The browser queues incoming PCM chunks (up to a 120s buffer) and raises the AudioWorklet ducking threshold while audio plays so speaker bleed does not interrupt speech.
+8. On interruption, disconnect, or expiry, active tasks and audio streams are cancelled and the ownership-aware session lease is released.
+
+## How to use
+
+1. Start the backend and frontend servers (see **Getting started** below) and open `http://localhost:5173`.
+2. On the home page, verify **Provider readiness** (`Prisma`, `Evon`, and `Timbre` show `Configured` when values are set in `backend/.env`).
+3. Pick an experience:
+   - **Try scam simulation (`/scam-demo`):** Choose **Hindi** or **English**, click **Simulate incoming call** → **Accept**, and speak into the microphone. Live Prisma transcripts appear automatically, explicit OTP/UPI PIN/remote-access requests trigger immediate `SCAM CALL DETECTED` alerts and Timbre spoken warnings, and ambiguous turns (e.g. KYC links or digital arrest threats) are evaluated by the configured LLM endpoint.
+   - **Talk to Vaani (`/assistant`):** Enabled when `Prisma`, `Timbre`, and `EVON_BASE_URL` are all configured. Accept the session and speak naturally in Hindi, Hinglish, or English—Vaani replies aloud while background scam monitoring watches the conversation. Use **Interrupt Vaani**, **Mute microphone**, **Mute speaker**, or **End session** at any time.
 
 ## Repository layout
 
@@ -241,7 +267,7 @@ Keep this file private. Never commit it or place provider credentials in a `VITE
 
 ### 2. Configure contextual reasoning
 
-The current Evon adapter expects an OpenAI-compatible remote chat-completions API. Configure it only with a remote HTTPS endpoint for which you have authorization:
+The `EvonClient` adapter calls an OpenAI-compatible `/chat/completions` API. In production (`ENVIRONMENT=production`), `EVON_BASE_URL` must use `https://`:
 
 ```dotenv
 EVON_BASE_URL=https://your-authorized-remote-endpoint/v1
@@ -250,9 +276,16 @@ EVON_API_KEY=your-provider-api-key
 EVON_TIMEOUT_SECONDS=20
 ```
 
-These values are examples, not Gnani endpoint details. Use the exact endpoint, model identifier, authentication scheme, and request contract supplied in your Gnani account documentation. If Gnani's managed Evon endpoint is not OpenAI-compatible, the backend needs a dedicated Gnani Evon adapter; setting the URL alone will not make incompatible APIs work.
+For local CPU/laptop development without remote Evon access (`ENVIRONMENT=development`), you can also point `EVON_BASE_URL` at a local OpenAI-compatible server such as Ollama (`ollama serve`):
 
-If Evon is not configured, the deterministic ScamShield rules remain available, but contextual scam analysis and the full Vaani Assistant reasoning flow will not be enabled.
+```dotenv
+EVON_BASE_URL=http://127.0.0.1:11434/v1
+EVON_API_KEY=
+EVON_MODEL=qwen2.5-coder:1.5b
+EVON_TIMEOUT_SECONDS=45
+```
+
+If Gnani's managed Evon endpoint uses a non-OpenAI contract, implement a dedicated Gnani Evon adapter. If `EVON_BASE_URL` is left blank, deterministic ScamShield rules remain active while contextual LLM classification and Vaani Assistant stay disabled.
 
 ### 3. Start the backend
 
@@ -301,7 +334,7 @@ Open `http://localhost:5173` and grant microphone access when starting a session
 | `TIMBRE_WS_URL` | Realtime TTS WebSocket endpoint | Defaults to the current configured Gnani endpoint |
 | `TIMBRE_VOICE` | TTS voice | Confirm availability in your Gnani account |
 | `TIMBRE_LANGUAGE` | TTS language mode | Defaults to `hi-en` |
-| `EVON_BASE_URL` | Remote OpenAI-compatible reasoning endpoint | Must not point to a model running on the user's PC |
+| `EVON_BASE_URL` | OpenAI-compatible reasoning `/v1` endpoint | Must use `https://` in `production`; local endpoints such as Ollama can be used in `development` |
 | `EVON_MODEL` | Model identifier expected by that endpoint | Use the provider-issued identifier |
 | `EVON_API_KEY` | Optional reasoning-provider credential | Secret; backend only |
 | `ENVIRONMENT` | Runtime environment | `development`, `test`, or `production` |
@@ -349,14 +382,15 @@ The frontend is exposed on port 8080 by default. Configure `CORS_ORIGINS` to mat
 ## Security, privacy, and safety
 
 - Provider API keys stay on the backend and must never be exposed through frontend build variables or API responses.
-- WebSocket sessions use short-lived HMAC capabilities, Origin checks, and a single active connection claim.
+- WebSocket sessions use short-lived HMAC capabilities, required `Origin` validation, and an expiring ownership-aware connection lease.
+- Session creation uses sliding-window IP rate limiting (Redis sorted-set in production, IPv6 `/64` normalized).
 - Production should use Redis, explicit CORS origins, a strong unique signing secret, and HTTPS/WSS.
 - Raw audio and transcripts are not persisted by default.
 - Do not log raw audio, provider credentials, authorization headers, or sensitive financial information.
 - Use fictional examples in demonstrations. Never ask for or store real OTPs, UPI PINs, CVVs, passwords, or full account details.
 - Clearly disclose that users are interacting with an AI assistant.
 - VaaniShield is not a certified financial security product and does not currently intercept real phone calls.
-- Do not describe the application as providing noise cancellation; audio preprocessing is not equivalent to denoising.
+- Browser WebRTC AEC/NS/AGC and the AudioWorklet 85 Hz HPF / adaptive soft gate reduce low-frequency hum and speaker bleed, but are not certified neural denoising; evaluate noisy ASR accuracy directly.
 
 ## Known limitations and release checklist
 

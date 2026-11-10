@@ -159,3 +159,90 @@ def test_contradictory_evon_output_triggers_uncertain_fallback(monkeypatch):
             assert "threat.detected" not in events
             status_events = [item for item in received if item["event"] == "analysis.status"]
             assert status_events and status_events[0]["payload"]["mode"] == "uncertain"
+
+
+def test_split_turn_and_small_llm_scam_escalation(monkeypatch):
+    async def small_llm_classify(transcript, _context):
+        if "KYC" in transcript:
+            return {
+                "scam_detected": True,
+                "risk_level": "medium",
+                "risk_score": 60,
+                "scam_type": "financial_scam",
+                "signals": ["kyc_phishing_link"],
+                "explanation": "Caller asks user to click an urgent KYC update link.",
+                "recommended_action": "continue_with_caution",
+                "warning_message": "Do not click unknown KYC links.",
+            }
+        return {
+            "scam_detected": False,
+            "risk_level": "low",
+            "risk_score": 5,
+            "scam_type": "none",
+            "signals": [],
+            "explanation": "Incomplete phrase.",
+            "recommended_action": "continue_with_caution",
+            "warning_message": "",
+        }
+
+    monkeypatch.setattr("app.main.settings.gnani_api_key", "")
+    monkeypatch.setattr("app.main.evon.classify_scam", small_llm_classify)
+    with TestClient(app) as client:
+        session = client.post("/api/sessions", json={"session_type": "scam_demo"}).json()
+        with client.websocket_connect(
+            f"/ws/sessions/{session['session_id']}",
+            subprotocols=["vaanishield.v1", f"session.{session['token']}"],
+            headers={"Origin": "http://localhost:5173"},
+        ) as ws:
+            assert ws.receive_json()["event"] == "session.ready"
+            assert ws.receive_json()["event"] == "provider.status"
+            ws.send_json({"event": "transcript.demo", "payload": {"text": "Your KYC is pending, click this link now."}})
+            received = [ws.receive_json() for _ in range(3)]
+            threats = [item for item in received if item["event"] == "threat.detected"]
+            assert threats and threats[0]["payload"]["recommended_action"] == "warn_user"
+
+            ws.send_json({"event": "transcript.demo", "payload": {"text": "Apna OTP"}})
+            for _ in range(3):
+                ws.receive_json()
+            ws.send_json({"event": "transcript.demo", "payload": {"text": "bata do"}})
+            split_received = [ws.receive_json() for _ in range(3)]
+            split_threats = [item for item in split_received if item["event"] == "threat.detected"]
+            assert split_threats and split_threats[0]["payload"]["scam_type"] == "otp_harvesting"
+
+
+def test_assistant_mode_detects_explicit_scam_during_conversation(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from app.main import analyse_turn
+
+    sent = []
+
+    class FakeWS:
+        async def send_json(self, data):
+            sent.append(data)
+
+        async def send_bytes(self, _chunk):
+            pass
+
+    monkeypatch.setattr("app.main.settings.gnani_api_key", "")
+    respond_mock = AsyncMock(return_value="should not be called")
+    monkeypatch.setattr("app.main.evon.respond", respond_mock)
+
+    asyncio.run(
+        analyse_turn(
+            "assistant",
+            "कृपया अपना ओटीपी बताइए",
+            ["कृपया अपना ओटीपी बताइए"],
+            [],
+            FakeWS(),
+            asyncio.Lock(),
+            asyncio.Event(),
+            set(),
+            asyncio.Lock(),
+        )
+    )
+    respond_mock.assert_not_awaited()
+    events = [item["event"] for item in sent]
+    assert "assistant.message" in events
+    assert "threat.detected" in events

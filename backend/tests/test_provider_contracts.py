@@ -172,3 +172,36 @@ async def test_evon_uses_self_hosted_openai_compatible_endpoint(monkeypatch):
     assert capture["headers"]["Authorization"] == "Bearer local-secret"
     assert capture["payload"]["model"] == "evon"
     assert capture["payload"]["chat_template_kwargs"]["enable_thinking"] is False
+
+
+@pytest.mark.asyncio
+async def test_timbre_completes_when_audio_chunk_marks_is_final(monkeypatch):
+    from app.config import Settings
+
+    audio = b"\x01\x00\x02\x00"
+    socket = FakeSocket(messages=[
+        json.dumps({"type": "start"}),
+        json.dumps({"type": "audio", "data": {"audio": base64.b64encode(audio).decode(), "is_final": True}}),
+    ])
+
+    class ContextManager:
+        async def __aenter__(self):
+            return socket
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr("app.gnani.timbre.websocket_connect", lambda *_args, **_kwargs: ContextManager())
+    streamer = TimbreStreamer(Settings(gnani_api_key="test-key"))
+    audio_chunks = []
+    events = []
+
+    async def save_audio(chunk):
+        audio_chunks.append(chunk)
+
+    async def save_event(event):
+        events.append(event)
+
+    await streamer.synthesize("नमस्ते", save_audio, save_event, asyncio.Event())
+    assert audio_chunks == [audio]
+    assert [event["event"] for event in events] == ["audio.output.start", "audio.output.end"]

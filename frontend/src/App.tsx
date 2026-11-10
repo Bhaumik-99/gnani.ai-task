@@ -51,11 +51,9 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
   const [partial, setPartial] = useState("");
   const [reply, setReply] = useState("");
   const [threat, setThreat] = useState<ThreatPayload | null>(null);
-  const [phrase, setPhrase] = useState("Hello sir, main bank se bol raha hoon. Account block hone se bachane ke liye apna OTP bata dijiye.");
   const [busy, setBusy] = useState(false);
   const [muted, setMuted] = useState(false);
   const [speakerMuted, setSpeakerMuted] = useState(false);
-  const [sampleBusy, setSampleBusy] = useState(false);
   const [language, setLanguage] = useState<SessionLanguage>("hi-IN");
   const [providerConfig, setProviderConfig] = useState<Awaited<ReturnType<typeof getConfig>> | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
@@ -149,8 +147,12 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
       const prismaReady = config.providers.some(provider => provider.provider === "prisma" && provider.configured);
       if (prismaReady) {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("Microphone capture is unavailable in this browser.");
+        const context = new AudioContext();
+        contextRef.current = context;
+        void context.resume();
+        playerRef.current = new PcmStreamPlayer(context, playing => captureRef.current?.setDucking(playing));
         streamRef.current = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, noiseSuppression: false, echoCancellation: false, autoGainControl: false },
+          audio: { channelCount: 1, noiseSuppression: true, echoCancellation: true, autoGainControl: true },
           video: false
         });
       }
@@ -168,15 +170,12 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
       ws.onopen = async () => {
         if (connectTimerRef.current !== undefined) window.clearTimeout(connectTimerRef.current);
         try {
-          if (streamRef.current) {
-            const context = new AudioContext();
-            contextRef.current = context;
-            await context.resume();
-            playerRef.current = new PcmStreamPlayer(context);
+          if (contextRef.current && contextRef.current.state === "suspended") {
+            await contextRef.current.resume();
           }
           ws.send(JSON.stringify({ event: "session.start", payload: { language_code: language, sample_rate: inputRateRef.current } }));
           setPhase("active");
-          setStatus(prismaReady ? "Session connected · starting Prisma" : "Prisma not configured · use the fictional demo phrase");
+          setStatus(prismaReady ? "Session connected · starting Prisma" : "Prisma not configured · live transcription unavailable");
           setBusy(false);
         } catch (error) {
           setStatus(error instanceof Error ? error.message : "Could not initialize voice session.");
@@ -202,12 +201,18 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
           case "provider.status":
             if (payload.provider === "prisma" && payload.status === "connected") void startCapture(ws);
             else if (payload.provider === "prisma") {
-              setStatus(payload.status === "not_configured" ? "Prisma not configured · fictional phrase test remains available" : "Prisma provider unavailable");
+              setStatus(payload.status === "not_configured" ? "Prisma not configured · live transcription unavailable" : "Prisma provider unavailable");
               if (payload.status !== "connecting") {
                 stopMicrophone(streamRef.current);
                 streamRef.current = undefined;
               }
             }
+            break;
+          case "speech.start":
+            setStatus("Speech detected…");
+            break;
+          case "transcript.processing":
+            setStatus("Transcribing speech…");
             break;
           case "transcript.partial":
             setPartial(String(payload.text ?? ""));
@@ -215,17 +220,26 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
           case "transcript.final":
             setTranscript(current => current ? `${current}\n${String(payload.text ?? "")}` : String(payload.text ?? ""));
             setPartial("");
-            setSampleBusy(false);
+            setStatus(assistant ? "Thinking…" : "Analysing transcript for scam signals…");
             break;
           case "threat.detected":
           case "threat.updated":
             setThreat(payload as unknown as ThreatPayload);
+            setStatus("Scam warning detected");
             break;
           case "analysis.status":
-            setStatus(String(payload.reason ?? `Analysis: ${String(payload.mode ?? "complete")}`));
+            if (payload.mode === "analysed") {
+              setStatus(`Listening · no scam detected (${String(payload.risk_level ?? "low")})`);
+            } else {
+              setStatus(String(payload.reason ?? `Analysis: ${String(payload.mode ?? "complete")}`));
+            }
             break;
           case "assistant.message":
             setReply(String(payload.text ?? ""));
+            break;
+          case "assistant.interrupted":
+            playerRef.current?.stop();
+            setStatus("Interrupted · listening");
             break;
           case "assistant.error":
           case "provider.error":
@@ -234,6 +248,7 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
             break;
           case "audio.output.start":
             outputRateRef.current = Number(payload.sample_rate ?? 24000);
+            setStatus(assistant ? "Vaani speaking…" : "Speaking scam warning…");
             break;
           case "audio.output.end":
             setStatus("Response finished · listening");
@@ -277,12 +292,6 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
     }
   }
 
-  function sendSample() {
-    const ws = socketRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) { setStatus("Connect the demo session first."); return; }
-    setSampleBusy(true);
-    ws.send(JSON.stringify({ event: "transcript.demo", payload: { text: phrase } }));
-  }
   function toggleMic() {
     const next = !muted;
     setMuted(next);
@@ -323,13 +332,12 @@ function CallScreen({ assistant = false }: { assistant?: boolean }) {
     {phase === "intro" && <section className="call-intro"><div className="intro-orb">{assistant ? <AudioLines size={34}/> : <ShieldAlert size={34}/>}</div><small>{assistant ? "VOICE CONVERSATION" : "SIMULATED INCOMING CALL"}</small><h1>{assistant ? "Talk to Vaani." : "Test your protection."}</h1><p>{assistant ? "Talk naturally in Hindi or English. Configure all three model services to enable live conversation." : "Start a simulated call, speak a fictional scenario, and inspect transcript and risk evidence."}</p><div className="permission-note"><Mic size={16}/> Microphone access is requested only when Prisma is configured and the session starts.</div><label className="language-picker">Speech language<select value={language} onChange={event => setLanguage(event.target.value as SessionLanguage)}><option value="hi-IN">Hindi</option><option value="en-IN">English</option></select></label>{assistant && !providerConfig?.assistant_enabled && <div className="permission-note">{configLoading ? "Checking provider readiness…" : "Configure Prisma, self-hosted Evon v3.3 and Timbre to enable voice conversations."}</div>}<button className="button primary" disabled={assistant && (configLoading || !providerConfig?.assistant_enabled)} onClick={() => setPhase("incoming")}>{assistant ? <Headphones size={17}/> : <PhoneCall size={17}/>} {assistant ? "Prepare voice session" : "Simulate incoming call"}</button></section>}
     {phase === "incoming" && <section className="phone-shell"><div className="phone-top"><span>VAANISHIELD DEMO</span><span>•••</span></div><div className="caller-avatar"><PhoneCall size={28}/></div><small>{assistant ? "VOICE ASSISTANT" : "INCOMING DEMO CALL"}</small><h2>{assistant ? "Vaani Assistant" : "Unknown Caller"}</h2><p>{assistant ? "Hinglish · AI voice session" : "Simulated caller · Not a real phone call"}</p><div className="incoming-actions"><button className="decline" onClick={() => setPhase("intro")}><PhoneOff/></button><button className="accept" disabled={busy} onClick={acceptCall}><Phone/></button></div><div className="action-labels"><span>Cancel</span><span>{busy ? "Connecting…" : "Accept"}</span></div><div className="status-text">{status}</div></section>}
     {phase === "active" && <section className={`phone-shell active-shell ${threat ? "alert-shell" : ""}`}><div className="phone-top"><span>{assistant ? "VAANI ASSISTANT" : "SCAMSHIELD"}</span><span className="live-dot"/></div><div className="active-caller"><div className="caller-avatar">{assistant ? <AudioLines size={28}/> : <Shield size={28}/>}</div><h2>{assistant ? "Vaani" : "Unknown Caller"}</h2><p>{duration} · {status}</p></div>
-      {threat && !assistant ? <div className="threat-alert"><div><ShieldAlert size={18}/> SCAM CALL DETECTED</div><h3>Do not share sensitive information.</h3><p>{threat.warning_message}</p><p>{threat.explanation}</p><div className="threat-meta"><b>{threat.scam_type.replace(/_/g, " ")}</b><b>{threat.risk_level.toUpperCase()}</b></div>{threat.evidence.map((item, index) => <small key={index}>• {item.text} · {item.category}</small>)}</div> : <div className="wave-panel"><div className="wave-bars"><Activity size={28}/></div><span>{assistant ? "Listening · responses require Evon and Timbre" : "Live Prisma transcription when configured"}</span></div>}
+      {threat ? <div className="threat-alert"><div><ShieldAlert size={18}/> SCAM CALL DETECTED</div><h3>Do not share sensitive information.</h3><p>{threat.warning_message}</p><p>{threat.explanation}</p><div className="threat-meta"><b>{threat.scam_type.replace(/_/g, " ")}</b><b>{threat.risk_level.toUpperCase()}</b></div>{threat.evidence.map((item, index) => <small key={index}>• {item.text} · {item.category}</small>)}</div> : <div className="wave-panel"><div className="wave-bars"><Activity size={28}/></div><span>{assistant ? "Listening · responses require Evon and Timbre" : "Live Prisma transcription when configured"}</span></div>}
       <div className="transcript"><small>TRANSCRIPT</small><p>{transcript || "Speak to receive a Prisma transcript."}{partial ? `\n… ${partial}` : ""}</p></div>
       {reply && <div className="transcript reply-panel"><small>VAANI RESPONSE</small><p>{reply}</p></div>}
-      {!assistant && <div className="demo-input"><label htmlFor="demo-phrase">FICTIONAL DEMO PHRASE · LOCAL RULE TEST</label><textarea id="demo-phrase" value={phrase} onChange={e => setPhrase(e.target.value)}/><button disabled={sampleBusy} onClick={sendSample}>{sampleBusy ? "Analysing…" : "Analyse sample phrase"}</button></div>}
       <div className="call-controls"><button disabled={!streamRef.current} title={muted ? "Unmute microphone" : "Mute microphone"} onClick={toggleMic}>{muted ? <MicOff size={19}/> : <Mic size={19}/>}</button><button disabled={!playerRef.current} title={speakerMuted ? "Enable speaker" : "Mute speaker"} onClick={toggleSpeaker}>{speakerMuted ? <VolumeX size={19}/> : <Volume2 size={19}/>}</button>{assistant && <button title="Interrupt Vaani" onClick={interrupt}><Activity size={19}/></button>}<button className="hangup" title="End session" onClick={endCall}><PhoneOff size={20}/></button></div><span className="status-text">{status}</span>
     </section>}
-    {phase === "ended" && <section className="ended-card"><CheckCircle2 size={34}/><h2>Session ended</h2><p>{threat ? "A suspicious request was flagged in this demo session." : "Your simulated session has finished."}</p>{threat && <div className="threat-meta"><b>{threat.scam_type}</b><b>{threat.risk_level}</b></div>}<button className="button primary" onClick={() => { endRequestedRef.current = false; setPhase("intro"); setSeconds(0); setTranscript(""); setPartial(""); setReply(""); setThreat(null); setStatus("Ready"); setSampleBusy(false); }}>Start again</button></section>}
+    {phase === "ended" && <section className="ended-card"><CheckCircle2 size={34}/><h2>Session ended</h2><p>{threat ? "A suspicious request was flagged in this demo session." : "Your simulated session has finished."}</p>{threat && <div className="threat-meta"><b>{threat.scam_type}</b><b>{threat.risk_level}</b></div>}<button className="button primary" onClick={() => { endRequestedRef.current = false; setPhase("intro"); setSeconds(0); setTranscript(""); setPartial(""); setReply(""); setThreat(null); setStatus("Ready"); }}>Start again</button></section>}
   </main>;
 }
 

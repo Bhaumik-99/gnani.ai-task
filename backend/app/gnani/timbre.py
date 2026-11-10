@@ -69,9 +69,12 @@ class TimbreStreamer:
                         if total > self.settings.max_tts_audio_bytes:
                             raise RuntimeError("Timbre output exceeded the per-session audio limit")
                         await send_audio(chunk)
+                    if isinstance(data, dict) and data.get("is_final") is True:
+                        completed = True
+                        break
                 elif kind == "error":
                     raise RuntimeError(str(event.get("message", "Timbre synthesis failed")))
-                elif kind == "complete" or (kind == "audio" and (event.get("data") or {}).get("is_final") is True):
+                elif kind == "complete":
                     completed = True
                     break
             if not completed and not (cancel_event and cancel_event.is_set()):

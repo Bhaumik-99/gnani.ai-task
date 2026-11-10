@@ -5,7 +5,7 @@ Create a session with `POST /api/sessions`. The response contains a short-lived 
 - `vaanishield.v1`
 - `session.<signed-capability-token>`
 
-The token is carried in the handshake subprotocol rather than the URL. The server checks the signature, expiry, session binding, Origin (when present) and exclusive socket claim.
+The token is carried in the handshake subprotocol rather than the URL. The server checks the signature, expiry, session binding, required `Origin` header, and exclusive ownership-aware socket lease.
 
 ## Client text events
 
@@ -16,7 +16,7 @@ The token is carried in the handshake subprotocol rather than the URL. The serve
 {"event":"session.end","payload":{}}
 ```
 
-`transcript.demo` is supported only for the ScamShield simulated experience. It is untrusted sample text and is not represented as a Prisma transcript.
+`transcript.demo` is a backend WebSocket event retained for automated testing in `scam_demo` sessions (live UI calls use microphone streaming directly). It is untrusted sample text and is not represented as a Prisma transcript.
 
 ## Client binary frames
 

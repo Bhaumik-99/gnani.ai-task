@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -26,9 +27,11 @@ timbre = TimbreStreamer(settings)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await store.start()
+    await evon.start()
     try:
         yield
     finally:
+        await evon.close()
         await store.close()
 
 
@@ -121,80 +124,171 @@ async def speak(text: str, ws: WebSocket, lock: asyncio.Lock, cancel: asyncio.Ev
     )
 
 
-async def analyse_turn(session_type: str, text: str, context: list[str], ws: WebSocket,
-                       lock: asyncio.Lock, cancel: asyncio.Event, alerted: set[str]):
-    if cancel.is_set():
-        return
-    if session_type == "scam_demo":
-        deterministic = analyse_explicit_request(text)
-        if deterministic:
-            await send_json(ws, lock, "threat.detected", deterministic.model_dump())
-            if deterministic.scam_type not in alerted:
-                alerted.add(deterministic.scam_type)
-                try:
-                    await speak(deterministic.warning_message, ws, lock, cancel)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    await send_json(ws, lock, "audio.output.error", {"message": "Spoken warning is unavailable."})
-            # Contextual inference cannot downgrade an explicit credential-theft signal.
-            return
+_SUSPICIOUS_CONTEXT = re.compile(
+    r"kyc|link|click|block|suspend|freeze|police|arrest|cbi|customs|parcel|courier|lottery|prize|refund|transfer|money|pay|rupaye|paise|qr|scan|verify|bank|account|otp|pin|cvv|password|anydesk|teamviewer"
+    r"|केवाईसी|लिंक|क्लिक|ब्लॉक|बंद|पुलिस|अरेस्ट|कस्टम्स|पार्सल|लॉटरी|इनाम|पैसे|रुपये|ट्रांसफर|बैंक|खाता|वेरिफाई|ओटीपी|पिन|एनीडेस्क",
+    re.I,
+)
+_RISK_BAND_DEFAULTS = {"medium": (40, 69, 55), "high": (70, 89, 80), "critical": (90, 100, 95)}
+
+
+def _detect_explicit_with_context(text: str, transcript_history: list[str]) -> ThreatResult | None:
+    direct = analyse_explicit_request(text)
+    if direct is not None:
+        return direct
+    if len(transcript_history) >= 2 and analyse_explicit_request(transcript_history[-2]) is None:
+        combined = analyse_explicit_request(f"{transcript_history[-2]} {text}")
+        if combined is not None:
+            return combined
+    if len(transcript_history) >= 3 and analyse_explicit_request(f"{transcript_history[-3]} {transcript_history[-2]}") is None:
+        combined = analyse_explicit_request(f"{transcript_history[-3]} {transcript_history[-2]} {text}")
+        if combined is not None:
+            return combined
+    return None
+
+
+def _validate_evon_threat(result: dict, text: str) -> ThreatResult:
+    scam_detected = result.get("scam_detected")
+    if not isinstance(scam_detected, bool):
+        raise ValueError("scam_detected must be a boolean")
+    raw_signals = result.get("signals")
+    signals = (
+        [item.strip()[:64] for item in raw_signals[:12] if isinstance(item, str) and item.strip()]
+        if isinstance(raw_signals, list)
+        else []
+    )
+    risk_level = result.get("risk_level", "low")
+    risk_score = result.get("risk_score", 0)
+    scam_type = str(result.get("scam_type") or "unknown")[:80]
+    explanation = str(result.get("explanation") or "")[:500]
+    recommended_action = result.get("recommended_action", "continue_with_caution")
+    warning_message = str(result.get("warning_message") or "Be cautious and do not share sensitive information.")[:300]
+
+    if scam_detected:
+        if risk_level == "low":
+            risk_level = "medium"
+        if risk_level in _RISK_BAND_DEFAULTS:
+            lo, hi, mid = _RISK_BAND_DEFAULTS[risk_level]
+            if not isinstance(risk_score, int) or isinstance(risk_score, bool) or not (lo <= risk_score <= hi):
+                risk_score = mid
+        if recommended_action == "continue_with_caution":
+            recommended_action = "end_call" if risk_level == "critical" else "warn_user"
+        if not signals and scam_type:
+            signals = [scam_type[:64]]
+
+    return ThreatResult.model_validate({
+        "risk_level": risk_level,
+        "risk_score": risk_score,
+        "confidence": result.get("confidence"),
+        "scam_detected": scam_detected,
+        "scam_type": scam_type,
+        "signals": signals,
+        "evidence": [{"text": text[:240], "category": "model_context"}] if scam_detected else [],
+        "explanation": explanation,
+        "recommended_action": recommended_action,
+        "warning_message": warning_message,
+    })
+
+
+async def _emit_threat_and_warn(
+    threat: ThreatResult,
+    ws: WebSocket,
+    lock: asyncio.Lock,
+    cancel: asyncio.Event,
+    alerted: set[str],
+    speak_warning: bool = True,
+):
+    await send_json(ws, lock, "threat.detected", threat.model_dump())
+    if speak_warning and threat.scam_type not in alerted:
+        alerted.add(threat.scam_type)
+        try:
+            await speak(threat.warning_message, ws, lock, cancel)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await send_json(ws, lock, "audio.output.error", {"message": "Spoken warning is unavailable."})
+
+
+async def _classify_contextual_scam(
+    text: str,
+    context: list[str],
+    ws: WebSocket,
+    lock: asyncio.Lock,
+    cancel: asyncio.Event,
+    alerted: set[str],
+    scam_lock: asyncio.Lock,
+    emit_status: bool = True,
+    speak_warning: bool = True,
+):
+    async with scam_lock:
         try:
             result = await evon.classify_scam(text, context)
         except EvonNotConfigured:
-            await send_json(ws, lock, "analysis.status", {"mode": "deterministic_only", "reason": "Evon endpoint is not configured."})
+            if emit_status:
+                await send_json(ws, lock, "analysis.status", {"mode": "deterministic_only", "reason": "Evon endpoint is not configured."})
             return
         except asyncio.CancelledError:
             raise
         except Exception:
-            await send_json(ws, lock, "analysis.status", {"mode": "deterministic_only", "reason": "Evon unavailable; deterministic rules remain active."})
+            if emit_status:
+                await send_json(ws, lock, "analysis.status", {"mode": "deterministic_only", "reason": "Evon unavailable; deterministic rules remain active."})
             return
-        if cancel.is_set():
-            return
-        if not result:
+    if cancel.is_set():
+        return
+    if not result:
+        if emit_status:
             await send_json(ws, lock, "analysis.status", {"mode": "uncertain", "reason": "Evon did not return structured JSON."})
-            return
-        try:
-            scam_detected = result.get("scam_detected")
-            if not isinstance(scam_detected, bool):
-                raise ValueError("scam_detected must be a boolean")
-            raw_signals = result.get("signals")
-            signals = (
-                [item.strip()[:64] for item in raw_signals[:12] if isinstance(item, str) and item.strip()]
-                if isinstance(raw_signals, list)
-                else []
-            )
-            threat = ThreatResult.model_validate({
-                "risk_level": result.get("risk_level", "low"),
-                "risk_score": result.get("risk_score", 0),
-                "confidence": result.get("confidence"),
-                "scam_detected": scam_detected,
-                "scam_type": str(result.get("scam_type") or "unknown")[:80],
-                "signals": signals,
-                "evidence": [{"text": text[:240], "category": "model_context"}] if scam_detected else [],
-                "explanation": str(result.get("explanation") or "")[:500],
-                "recommended_action": result.get("recommended_action", "continue_with_caution"),
-                "warning_message": str(result.get("warning_message") or "Be cautious and do not share sensitive information.")[:300],
-            })
-        except Exception:
+        return
+    try:
+        threat = _validate_evon_threat(result, text)
+    except Exception:
+        if emit_status:
             await send_json(ws, lock, "analysis.status", {"mode": "uncertain", "reason": "Evon returned an invalid risk schema."})
-            return
-        if threat.scam_detected:
-            await send_json(ws, lock, "threat.detected", threat.model_dump())
-            if threat.scam_type not in alerted:
-                alerted.add(threat.scam_type)
-                try:
-                    await speak(threat.warning_message, ws, lock, cancel)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    await send_json(ws, lock, "audio.output.error", {"message": "Spoken warning is unavailable."})
-        else:
-            await send_json(ws, lock, "analysis.status", {"mode": "analysed", "risk_level": threat.risk_level, "risk_score": threat.risk_score})
+        return
+    if threat.scam_detected:
+        await _emit_threat_and_warn(threat, ws, lock, cancel, alerted, speak_warning=speak_warning)
+    elif emit_status:
+        await send_json(ws, lock, "analysis.status", {"mode": "analysed", "risk_level": threat.risk_level, "risk_score": threat.risk_score})
+
+
+async def analyse_turn(
+    session_type: str,
+    text: str,
+    transcript_history: list[str],
+    conversation_history: list[dict[str, str]],
+    ws: WebSocket,
+    lock: asyncio.Lock,
+    cancel: asyncio.Event,
+    alerted: set[str],
+    scam_lock: asyncio.Lock,
+    tasks: set[asyncio.Task] | None = None,
+):
+    if cancel.is_set():
+        return
+
+    deterministic = _detect_explicit_with_context(text, transcript_history)
+    if deterministic:
+        if session_type == "assistant":
+            await send_json(ws, lock, "assistant.message", {"text": deterministic.warning_message})
+        await _emit_threat_and_warn(deterministic, ws, lock, cancel, alerted, speak_warning=True)
+        return
+
+    if session_type == "scam_demo":
+        await _classify_contextual_scam(
+            text,
+            transcript_history,
+            ws,
+            lock,
+            cancel,
+            alerted,
+            scam_lock,
+            emit_status=True,
+            speak_warning=True,
+        )
         return
 
     try:
-        response = await evon.respond(text, context)
+        response = await evon.respond(text, conversation_history)
     except EvonNotConfigured:
         await send_json(ws, lock, "assistant.error", {"code": "EVON_NOT_CONFIGURED", "message": "Configure the Evon vLLM endpoint to enable Vaani."})
         return
@@ -205,7 +299,27 @@ async def analyse_turn(session_type: str, text: str, context: list[str], ws: Web
         return
     if cancel.is_set():
         return
+    conversation_history.append({"role": "user", "content": text})
+    conversation_history.append({"role": "assistant", "content": response})
+    del conversation_history[:-12]
     await send_json(ws, lock, "assistant.message", {"text": response})
+    if _SUSPICIOUS_CONTEXT.search(text):
+        bg_task = asyncio.create_task(
+            _classify_contextual_scam(
+                text,
+                transcript_history.copy(),
+                ws,
+                lock,
+                asyncio.Event(),
+                alerted,
+                scam_lock,
+                emit_status=False,
+                speak_warning=False,
+            )
+        )
+        if tasks is not None:
+            tasks.add(bg_task)
+            bg_task.add_done_callback(tasks.discard)
     try:
         await speak(response, ws, lock, cancel)
     except asyncio.CancelledError:
@@ -233,9 +347,11 @@ async def session_socket(ws: WebSocket, session_id: str):
 
     await ws.accept(subprotocol="vaanishield.v1")
     lock = asyncio.Lock()
+    scam_lock = asyncio.Lock()
     session_type = session["session_type"]
     deadline = asyncio.get_running_loop().time() + settings.session_ttl_seconds
     context: list[str] = []
+    conversation_history: list[dict[str, str]] = []
     alerted: set[str] = set()
     tasks: set[asyncio.Task] = set()
     active_turn: asyncio.Task | None = None
@@ -253,15 +369,31 @@ async def session_socket(ws: WebSocket, session_id: str):
         text = " ".join(text.split())[:settings.max_transcript_chars]
         if not text:
             return None
-        if active_turn is not None and not active_turn.done():
+        if session_type == "assistant" and active_turn is not None and not active_turn.done():
             cancel.set()
             active_turn.cancel()
             await asyncio.gather(active_turn, return_exceptions=True)
         context.append(text)
         del context[:-12]
         await send_json(ws, lock, "transcript.final", {"text": text, "source": source})
-        cancel = asyncio.Event()
-        task = asyncio.create_task(analyse_turn(session_type, text, context.copy(), ws, lock, cancel, alerted))
+        turn_cancel = asyncio.Event() if session_type == "scam_demo" else cancel
+        if session_type == "assistant":
+            cancel = asyncio.Event()
+            turn_cancel = cancel
+        task = asyncio.create_task(
+            analyse_turn(
+                session_type,
+                text,
+                context.copy(),
+                conversation_history,
+                ws,
+                lock,
+                turn_cancel,
+                alerted,
+                scam_lock,
+                tasks,
+            )
+        )
         active_turn = task
         tasks.add(task)
         task.add_done_callback(tasks.discard)

@@ -5,9 +5,9 @@
 - Provider API keys stay on the backend.
 - Session capabilities are HMAC-signed, bound to a session ID and short-lived (maximum 14 minutes).
 - Capability tokens are carried in the WebSocket subprotocol instead of URL query parameters.
-- WebSocket Origin is checked when supplied; CORS uses explicit configured origins.
-- One active WebSocket connection is allowed for each session.
-- Session creation has IP-based rate limiting, shared through Redis in production.
+- WebSocket `Origin` is required and matched against explicit `CORS_ORIGINS`; missing or untrusted origins are rejected.
+- One active WebSocket connection is allowed for each session via expiring ownership-aware leases.
+- Session creation uses sliding-window IP rate limiting (Redis sorted-set in production, IPv6 `/64` normalized).
 - Production startup requires a Redis URL, explicit CORS origins and a unique signing secret of at least 32 characters.
 - Control payloads and binary audio frames are size-limited and audio cadence is checked.
 - Raw audio and transcripts are not persisted by default.
